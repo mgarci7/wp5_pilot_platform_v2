@@ -1,5 +1,59 @@
 # Changelog
 
+## [1.2.0] - 2026-03-10
+
+### New Feature: Clone Experiment
+
+Added the ability to clone an existing experiment under a new ID, preserving the full configuration and generating fresh tokens.
+
+- **Clone Experiment button** in Dashboard Overview tab (next to Edit Experiment)
+- Opens a modal asking for the new experiment ID and optional description
+- Copies simulation settings, LLM parameters, treatment groups, and classifier config
+- Generates brand-new tokens (same group structure and counts, new values)
+- Dashboard automatically switches to the cloned experiment after creation
+
+**Files modified:**
+| File | Changes |
+|------|---------|
+| `backend/main.py` | Added `POST /admin/experiment/{id}/clone` endpoint |
+| `frontend/lib/admin-api.ts` | Added `cloneExperiment()` function |
+| `frontend/components/admin/Dashboard.tsx` | Added Clone button, modal, and `onCloned` prop |
+
+---
+
+### New Feature: CSV Export for Comparison
+
+Added a one-click CSV export of all session data for cross-experiment analysis.
+
+- **Export CSV button** in the Sessions tab of the Dashboard
+- One row per message including experiment parameters, session metadata, and classifier labels
+- Columns: `experiment_id`, `description`, `director/performer/moderator/classifier model`, `session_duration_minutes`, `messages_per_minute`, `context_window_size`, `session_id`, `treatment_group`, `session_status`, `started_at`, `ended_at`, `end_reason`, `message_id`, `sender`, `sender_type` (participant/agent), `content`, `sent_at`, `is_incivil`, `is_like_minded`, `inferred_participant_stance`, `classification_rationale`, `reply_to`, `reported`
+- Ideal for comparing different LLM models, prompts, and treatment approaches
+
+**Files modified:**
+| File | Changes |
+|------|---------|
+| `backend/main.py` | Added `GET /admin/sessions/csv/{experiment_id}` endpoint |
+| `frontend/lib/admin-api.ts` | Added `downloadSessionsCSV()` function |
+| `frontend/components/admin/Dashboard.tsx` | Added Export CSV button to Sessions tab |
+
+---
+
+### Classifier LLM — Implementation Audit
+
+The classifier was already fully implemented. Summary of what exists:
+
+- **Pipeline**: Runs as Stage 4 after Director → Performer → Moderator, before message storage
+- **Classifies each agent message** on two dimensions:
+  - `is_incivil`: true if message contains insults, contempt, or hostile tone
+  - `is_like_minded`: true/false/null based on participant's inferred stance from their own messages
+- **Stored** in dedicated DB columns (`is_incivil`, `is_like_minded`, `inferred_participant_stance`, `classification_rationale`)
+- **Dashboard** shows `% Incivil` and `% Like-minded` per session in the Sessions tab
+- **Configurable prompt** via the LLM step of the experiment wizard (Classifier section)
+- **Separate LLM role** with its own provider, model, temperature, top_p, max_tokens settings
+
+---
+
 ## [1.1.0] - 2026-03-10
 
 ### New Feature: Edit Experiment Button

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from typing import List, Optional
 
 import asyncpg
@@ -22,6 +21,10 @@ async def insert_message(
     mentions: Optional[List[str]] = None,
     liked_by: Optional[List[str]] = None,
     reported: bool = False,
+    is_incivil: Optional[bool] = None,
+    is_like_minded: Optional[bool] = None,
+    inferred_participant_stance: Optional[str] = None,
+    classification_rationale: Optional[str] = None,
     metadata: Optional[dict] = None,
 ) -> None:
     """Insert a new message row. Idempotent on message_id conflict."""
@@ -30,8 +33,10 @@ async def insert_message(
             """
             INSERT INTO messages(
                 message_id, session_id, experiment_id, sender, content, sent_at,
-                reply_to, quoted_text, mentions, liked_by, reported, metadata
-            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                reply_to, quoted_text, mentions, liked_by, reported,
+                is_incivil, is_like_minded, inferred_participant_stance,
+                classification_rationale, metadata
+            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
             ON CONFLICT(message_id) DO NOTHING
             """,
             message_id,
@@ -45,6 +50,10 @@ async def insert_message(
             mentions or [],
             liked_by or [],
             reported,
+            is_incivil,
+            is_like_minded,
+            inferred_participant_stance,
+            classification_rationale,
             json.dumps(metadata or {}),
         )
 
@@ -57,7 +66,9 @@ async def get_session_messages(
         rows = await conn.fetch(
             """
             SELECT message_id, sender, content, sent_at,
-                   reply_to, quoted_text, mentions, liked_by, reported, metadata, seq
+                   reply_to, quoted_text, mentions, liked_by, reported,
+                   is_incivil, is_like_minded, inferred_participant_stance,
+                   classification_rationale, metadata, seq
             FROM   messages
             WHERE  session_id = $1
             ORDER  BY seq
@@ -78,6 +89,10 @@ async def get_session_messages(
             "likes_count": len(r["liked_by"]),
             "liked_by": list(r["liked_by"]),
             "reported": r["reported"],
+            "is_incivil": r["is_incivil"],
+            "is_like_minded": r["is_like_minded"],
+            "inferred_participant_stance": r["inferred_participant_stance"],
+            "classification_rationale": r["classification_rationale"],
         }
         if meta:
             d.update(meta)

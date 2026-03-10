@@ -50,6 +50,10 @@ CREATE TABLE IF NOT EXISTS messages (
     mentions    TEXT[]      DEFAULT '{}',
     liked_by    TEXT[]      DEFAULT '{}',
     reported    BOOLEAN     DEFAULT FALSE,
+    is_incivil  BOOLEAN,
+    is_like_minded BOOLEAN,
+    inferred_participant_stance TEXT,
+    classification_rationale TEXT,
     metadata    JSONB       DEFAULT '{}',
     seq         BIGSERIAL
 );
@@ -86,6 +90,27 @@ DO $$ BEGIN
     ALTER TABLE experiments ADD COLUMN paused BOOLEAN DEFAULT FALSE;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
+
+-- Migrations: add classifier columns if missing (idempotent).
+DO $$ BEGIN
+    ALTER TABLE messages ADD COLUMN is_incivil BOOLEAN;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+DO $$ BEGIN
+    ALTER TABLE messages ADD COLUMN is_like_minded BOOLEAN;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+DO $$ BEGIN
+    ALTER TABLE messages ADD COLUMN inferred_participant_stance TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+DO $$ BEGIN
+    ALTER TABLE messages ADD COLUMN classification_rationale TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_messages_classification
+    ON messages(session_id, is_incivil, is_like_minded);
 
 CREATE TABLE IF NOT EXISTS agent_blocks (
     session_id  UUID        NOT NULL REFERENCES sessions(session_id),

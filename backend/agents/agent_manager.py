@@ -52,6 +52,10 @@ class AgentManager:
                 reply_to=message.reply_to,
                 quoted_text=message.quoted_text,
                 mentions=message.mentions,
+                is_incivil=message.is_incivil,
+                is_like_minded=message.is_like_minded,
+                inferred_participant_stance=message.inferred_participant_stance,
+                classification_rationale=message.classification_rationale,
                 metadata=message.metadata,
             )
         except Exception as exc:

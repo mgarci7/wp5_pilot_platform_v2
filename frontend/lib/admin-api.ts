@@ -256,6 +256,38 @@ export async function resetSessions(
   return res.json()
 }
 
+export async function cloneExperiment(
+  key: string,
+  sourceId: string,
+  newId: string,
+  description?: string,
+): Promise<{ status: string; source_experiment_id: string; new_experiment_id: string }> {
+  const res = await adminFetch(`/admin/experiment/${encodeURIComponent(sourceId)}/clone`, key, {
+    method: "POST",
+    body: JSON.stringify({ new_experiment_id: newId, description }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Clone failed" }))
+    throw new Error(err.detail || "Clone failed")
+  }
+  return res.json()
+}
+
+export async function downloadSessionsCSV(key: string, experimentId: string): Promise<void> {
+  const res = await adminFetch(`/admin/sessions/csv/${encodeURIComponent(experimentId)}`, key)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Export failed" }))
+    throw new Error(err.detail || "Export failed")
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = `${experimentId}_sessions.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export async function deleteExperiment(
   key: string,
   experimentId: string,

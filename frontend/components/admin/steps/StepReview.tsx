@@ -82,8 +82,8 @@ export default function StepReview({
       </Section>
 
       <Section title="LLM Pipeline">
-        <div className="grid grid-cols-3 gap-4 text-xs">
-          {(["director", "performer", "moderator"] as const).map((role) => {
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+          {(["director", "performer", "moderator", "classifier"] as const).map((role) => {
             const provider = simulation[`${role}_llm_provider` as keyof SimulationConfig] as string
             const model = simulation[`${role}_llm_model` as keyof SimulationConfig] as string
             const temp = simulation[`${role}_temperature` as keyof SimulationConfig] as number
@@ -100,6 +100,10 @@ export default function StepReview({
           })}
         </div>
         <KV label="Concurrency limit" value={simulation.llm_concurrency_limit} />
+        <KV
+          label="Classifier prompt"
+          value={`${(simulation.classifier_prompt_template || "").slice(0, 60)}${(simulation.classifier_prompt_template || "").length > 60 ? "..." : ""}`}
+        />
       </Section>
 
       <Section title="Treatment Groups">

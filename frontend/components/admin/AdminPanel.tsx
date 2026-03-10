@@ -53,6 +53,26 @@ const DEFAULT_SIMULATION: SimulationConfig = {
   moderator_temperature: 0.2,
   moderator_top_p: 1.0,
   moderator_max_tokens: 256,
+  classifier_llm_provider: "huggingface",
+  classifier_llm_model: "meta-llama/Llama-3.1-8B-Instruct",
+  classifier_temperature: 0.2,
+  classifier_top_p: 1.0,
+  classifier_max_tokens: 256,
+  classifier_prompt_template: `# Classifier Task
+
+Infer the participant's stance from the participant messages and classify the agent message.
+
+## Participant Messages
+{PARTICIPANT_MESSAGES}
+
+## Agent Message To Classify
+{AGENT_MESSAGE}
+
+Return ONLY a JSON object with keys:
+- is_incivil (true/false)
+- is_like_minded (true/false/null)
+- inferred_participant_stance (short text)
+- rationale (short text)`,
   context_window_size: 15,
   llm_concurrency_limit: 5,
 }
@@ -155,6 +175,7 @@ export default function AdminPanel() {
     director: false,
     performer: false,
     moderator: false,
+    classifier: false,
   })
 
   // Edit mode state
@@ -199,7 +220,7 @@ export default function AdminPanel() {
     setSimulation((prev) => ({ ...prev, ...updates }))
   }, [])
 
-  const handleLlmTestResult = useCallback((role: "director" | "performer" | "moderator", ok: boolean) => {
+  const handleLlmTestResult = useCallback((role: "director" | "performer" | "moderator" | "classifier", ok: boolean) => {
     setLlmTestResults((prev) => ({ ...prev, [role]: ok }))
   }, [])
 
@@ -270,11 +291,11 @@ export default function AdminPanel() {
         return null
       }
       case 2: {
-        for (const role of ["director", "performer", "moderator"] as const) {
+        for (const role of ["director", "performer", "moderator", "classifier"] as const) {
           const model = simulation[`${role}_llm_model` as keyof typeof simulation] as string
           if (!model.trim()) return `${role.charAt(0).toUpperCase() + role.slice(1)} model is required.`
         }
-        const untested = (["director", "performer", "moderator"] as const).filter((r) => !llmTestResults[r])
+        const untested = (["director", "performer", "moderator", "classifier"] as const).filter((r) => !llmTestResults[r])
         if (untested.length > 0) {
           const names = untested.map((r) => r.charAt(0).toUpperCase() + r.slice(1))
           return `Run a successful LLM test for: ${names.join(", ")}.`
@@ -330,7 +351,7 @@ export default function AdminPanel() {
     setStartsAt(sched.startsAt)
     setEndsAt(sched.endsAt)
     setSessionTouched(false)
-    setLlmTestResults({ director: false, performer: false, moderator: false })
+    setLlmTestResults({ director: false, performer: false, moderator: false, classifier: false })
     setEditingExperimentId(null) // Reset edit mode
     setSaveBanner(null)
     setSaveError("")
@@ -355,7 +376,7 @@ export default function AdminPanel() {
       setEndsAt(ends_at ? ends_at.slice(0, 16) : "")
       setEditingExperimentId(expId)
       // Mark LLM tests as passed since config was previously validated
-      setLlmTestResults({ director: true, performer: true, moderator: true })
+      setLlmTestResults({ director: true, performer: true, moderator: true, classifier: true })
       setTokens({ groups: {} }) // Keep empty, not needed for edit
       setSessionTouched(false)
       setSaveBanner(null)

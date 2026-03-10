@@ -105,3 +105,23 @@ async def test_message_with_reply_metadata(db_pool, experiment_id):
     reply = rows[1]
     assert reply["reply_to"] == MSG_A
     assert reply["quoted_text"] == "Original message"
+
+
+async def test_message_with_classifier_fields(db_pool, experiment_id):
+    await _insert_msg(
+        db_pool,
+        MSG_A,
+        "Carlos",
+        "Mensaje clasificado",
+        experiment_id,
+        is_incivil=True,
+        is_like_minded=False,
+        inferred_participant_stance="participante anti-subida de impuestos",
+        classification_rationale="Contiene insulto y contradice postura.",
+    )
+    rows = await message_repo.get_session_messages(db_pool, SESSION_ID)
+    msg = rows[0]
+    assert msg["is_incivil"] is True
+    assert msg["is_like_minded"] is False
+    assert "anti-subida" in msg["inferred_participant_stance"]
+    assert "insulto" in msg["classification_rationale"]

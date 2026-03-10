@@ -49,6 +49,7 @@ def _make_orchestrator(
     director_response=None,
     performer_response=None,
     moderator_response=None,
+    classifier_response=None,
     rng=None,
 ):
     """Create an Orchestrator with mock LLM clients."""
@@ -58,6 +59,7 @@ def _make_orchestrator(
     director_llm = AsyncMock()
     performer_llm = AsyncMock()
     moderator_llm = AsyncMock()
+    classifier_llm = AsyncMock()
 
     if director_response is not None:
         director_llm.generate_response = AsyncMock(return_value=director_response)
@@ -65,6 +67,15 @@ def _make_orchestrator(
         performer_llm.generate_response = AsyncMock(return_value=performer_response)
     if moderator_response is not None:
         moderator_llm.generate_response = AsyncMock(return_value=moderator_response)
+    if classifier_response is not None:
+        classifier_llm.generate_response = AsyncMock(return_value=classifier_response)
+    else:
+        classifier_llm.generate_response = AsyncMock(return_value=json.dumps({
+            "is_incivil": False,
+            "is_like_minded": None,
+            "inferred_participant_stance": "insufficient evidence",
+            "rationale": "No participant stance yet.",
+        }))
 
     logger = _make_logger()
 
@@ -72,6 +83,7 @@ def _make_orchestrator(
         director_llm=director_llm,
         performer_llm=performer_llm,
         moderator_llm=moderator_llm,
+        classifier_llm=classifier_llm,
         state=state,
         logger=logger,
         context_window_size=10,
@@ -174,6 +186,35 @@ class TestExecuteTurnMessage:
         assert result.message is not None
         assert result.message.sender == "Alice"
         assert result.message.content == "Hello everyone!"
+
+    @pytest.mark.asyncio
+    async def test_message_includes_classifier_labels(self):
+        state = _make_state()
+        orch, _ = _make_orchestrator(
+            state=state,
+            classifier_response=json.dumps({
+                "is_incivil": True,
+                "is_like_minded": False,
+                "inferred_participant_stance": "pro regularizacion",
+                "rationale": "Lenguaje hostil y contrario a la postura.",
+            }),
+        )
+
+        anon_alice = orch._name_map["Alice"]
+        director_resp = _director_json(
+            next_agent=anon_alice,
+            action_type="message",
+            performer_instruction={"tone": "aggressive"},
+        )
+        orch.director_llm.generate_response = AsyncMock(return_value=director_resp)
+        orch.performer_llm.generate_response = AsyncMock(return_value="No tienes ni idea.")
+        orch.moderator_llm.generate_response = AsyncMock(return_value="No tienes ni idea.")
+
+        result = await orch.execute_turn("treatment_A")
+        assert result is not None
+        assert result.message.is_incivil is True
+        assert result.message.is_like_minded is False
+        assert result.message.inferred_participant_stance == "pro regularizacion"
 
     @pytest.mark.asyncio
     async def test_director_system_prompt_cached(self):

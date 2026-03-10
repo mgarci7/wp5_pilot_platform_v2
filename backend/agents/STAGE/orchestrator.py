@@ -9,6 +9,12 @@ from utils import Logger
 from agents.STAGE.director import build_director_system_prompt, build_director_user_prompt, parse_director_response
 from agents.STAGE.performer import build_performer_system_prompt, build_performer_user_prompt
 from agents.STAGE.moderator import build_moderator_system_prompt, build_moderator_user_prompt, parse_moderator_response
+from agents.STAGE.classifier import (
+    DEFAULT_CLASSIFIER_PROMPT_TEMPLATE,
+    build_classifier_system_prompt,
+    build_classifier_user_prompt,
+    parse_classifier_response,
+)
 
 
 MAX_PERFORMER_RETRIES = 3
@@ -87,7 +93,7 @@ def deanonymize_text(text: str, reverse_map: Dict[str, str]) -> str:
 
 
 class Orchestrator:
-    """Coordinates the Director->Performer->Moderator pipeline for each simulation turn.
+    """Coordinates the Director->Performer->Moderator->Classifier pipeline.
 
     The Orchestrator is stateless with respect to conversation history; it
     reads the current state each time `execute_turn` is called.
@@ -102,19 +108,27 @@ class Orchestrator:
         director_llm,
         performer_llm,
         moderator_llm,
+        classifier_llm,
         state,
         logger: Logger,
         context_window_size: int = 10,
         chatroom_context: str = "",
+        classifier_prompt_template: Optional[str] = None,
         rng: Optional[random.Random] = None,
     ):
         self.director_llm = director_llm
         self.performer_llm = performer_llm
         self.moderator_llm = moderator_llm
+        self.classifier_llm = classifier_llm
         self.state = state
         self.logger = logger
         self.context_window_size = context_window_size
         self.chatroom_context = chatroom_context
+        self.classifier_prompt_template = (
+            classifier_prompt_template
+            if isinstance(classifier_prompt_template, str) and classifier_prompt_template.strip()
+            else DEFAULT_CLASSIFIER_PROMPT_TEMPLATE
+        )
 
         # Build the shuffled name mapping (stable for the session lifetime).
         _rng = rng or random.Random()
@@ -132,14 +146,61 @@ class Orchestrator:
         self._moderator_system_prompt = build_moderator_system_prompt(
             chatroom_context=chatroom_context,
         )
+        self._classifier_system_prompt = build_classifier_system_prompt(
+            chatroom_context=chatroom_context,
+        )
         self._director_system_prompt: Optional[str] = None
 
     def _deanon_name(self, anon_name: str) -> str:
         """Map an anonymous label back to the real name."""
         return self._reverse_map.get(anon_name, anon_name)
 
+    async def _classify_message(
+        self,
+        *,
+        agent_message: str,
+    ) -> Dict[str, Optional[object]]:
+        """Run the post-moderation classifier stage for a generated message."""
+        participant_messages = [
+            m for m in self.state.messages
+            if m.sender == self.state.user_name
+        ]
+
+        classifier_user_prompt = build_classifier_user_prompt(
+            participant_messages=participant_messages,
+            agent_message=agent_message,
+            prompt_template=self.classifier_prompt_template,
+            chatroom_context=self.chatroom_context,
+        )
+
+        classifier_raw = None
+        try:
+            classifier_raw = await self.classifier_llm.generate_response(
+                classifier_user_prompt,
+                max_retries=1,
+                system_prompt=self._classifier_system_prompt,
+            )
+        except Exception as e:
+            self.logger.log_error("classifier_llm_call", str(e))
+
+        self.logger.log_llm_call(
+            agent_name="__classifier__",
+            prompt=f"[SYSTEM]\n{self._classifier_system_prompt}\n\n[USER]\n{classifier_user_prompt}",
+            response=classifier_raw,
+            error=None if classifier_raw else "Classifier LLM returned no response",
+        )
+
+        if not classifier_raw:
+            return {}
+
+        try:
+            return parse_classifier_response(classifier_raw)
+        except ValueError as e:
+            self.logger.log_error("classifier_parse", str(e))
+            return {}
+
     async def execute_turn(self, treatment: str) -> Optional[TurnResult]:
-        """Run one full Director->Performer cycle.
+        """Run one full Director->Performer->Moderator->Classifier cycle.
 
         Returns a TurnResult on success, or None if the cycle fails.
         """
@@ -326,12 +387,19 @@ class Orchestrator:
             if target_message:
                 quoted_text = target_message.content
 
+        # 8. Classify the final message content (post-moderation + post-formatting).
+        classification = await self._classify_message(agent_message=content)
+
         message = Message.create(
             sender=agent_name,
             content=content,
             reply_to=reply_to,
             quoted_text=quoted_text,
             mentions=mentions,
+            is_incivil=classification.get("is_incivil"),
+            is_like_minded=classification.get("is_like_minded"),
+            inferred_participant_stance=classification.get("inferred_participant_stance"),
+            classification_rationale=classification.get("classification_rationale"),
         )
 
         return TurnResult(

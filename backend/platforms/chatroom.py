@@ -7,6 +7,7 @@ from models import Message, Agent, SessionState
 from utils import Logger
 from utils.llm.llm_manager import LLMManager
 from agents.agent_manager import AgentManager
+from agents.STAGE.classifier import DEFAULT_CLASSIFIER_PROMPT_TEMPLATE
 from agents.STAGE.orchestrator import Orchestrator
 from features import load_features
 from db import connection as db_conn
@@ -19,7 +20,7 @@ class SimulationSession:
 
     Responsibilities:
     - manages platform event loop with tick-based pacing
-    - delegates all agent decisions to the Director->Performer pipeline
+    - delegates all agent decisions to the Director->Performer->Moderator->Classifier pipeline
       via the Orchestrator and AgentManager
     - persists all messages to PostgreSQL and broadcasts via Redis pub/sub
     - wiring platform-level config, lifecycle and websocket attachment
@@ -69,6 +70,7 @@ class SimulationSession:
         self.director_llm = LLMManager.from_simulation_config(self.simulation_config, role="director")
         self.performer_llm = LLMManager.from_simulation_config(self.simulation_config, role="performer")
         self.moderator_llm = LLMManager.from_simulation_config(self.simulation_config, role="moderator")
+        self.classifier_llm = LLMManager.from_simulation_config(self.simulation_config, role="classifier")
 
         self._rng = random.Random(int(self.simulation_config["random_seed"]))
 
@@ -103,11 +105,17 @@ class SimulationSession:
                     mentions=m.get("mentions"),
                     liked_by=set(m.get("liked_by", [])),
                     reported=m.get("reported", False),
+                    is_incivil=m.get("is_incivil"),
+                    is_like_minded=m.get("is_like_minded"),
+                    inferred_participant_stance=m.get("inferred_participant_stance"),
+                    classification_rationale=m.get("classification_rationale"),
                     metadata={k: v for k, v in m.items()
                                if k not in ("sender", "content", "timestamp",
                                             "message_id", "reply_to", "quoted_text",
                                             "mentions", "liked_by", "reported",
-                                            "likes_count")},
+                                            "likes_count", "is_incivil",
+                                            "is_like_minded", "inferred_participant_stance",
+                                            "classification_rationale")},
                 ))
 
         # Preload agent blocks (crash recovery / reconstruction).
@@ -124,10 +132,15 @@ class SimulationSession:
             director_llm=self.director_llm,
             performer_llm=self.performer_llm,
             moderator_llm=self.moderator_llm,
+            classifier_llm=self.classifier_llm,
             state=self.state,
             logger=self.logger,
             context_window_size=int(self.simulation_config["context_window_size"]),
             chatroom_context=self.chatroom_context,
+            classifier_prompt_template=self.simulation_config.get(
+                "classifier_prompt_template",
+                DEFAULT_CLASSIFIER_PROMPT_TEMPLATE,
+            ),
             rng=self._rng,
         )
 

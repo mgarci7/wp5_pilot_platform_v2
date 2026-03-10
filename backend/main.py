@@ -781,6 +781,65 @@ async def admin_update_config(experiment_id: str, body: dict, x_admin_key: str =
     return {"status": "updated", "experiment_id": experiment_id}
 
 
+@app.post("/admin/experiment/{experiment_id}/clone")
+async def admin_clone_experiment(experiment_id: str, body: dict, x_admin_key: str = Header(None)):
+    """Clone an existing experiment under a new ID.
+
+    Copies the full config (simulation + experimental) and generates fresh tokens
+    preserving the group structure and counts from the source experiment.
+    """
+    _require_admin(x_admin_key)
+
+    new_id = (body.get("new_experiment_id") or "").strip()
+    if not new_id:
+        raise HTTPException(status_code=422, detail="new_experiment_id is required")
+
+    pool = _get_pool()
+    source = await config_repo.get_experiment(pool, experiment_id)
+    if not source:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+
+    description = (body.get("description") or f"Clone of {experiment_id}").strip()
+    config_blob = source["config"]
+
+    try:
+        await config_repo.save_experiment_config(pool, new_id, config_blob, description)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    # Clone tokens: generate new unique tokens preserving group names and counts.
+    async with pool.acquire() as conn:
+        token_rows = await conn.fetch(
+            "SELECT treatment_group FROM tokens WHERE experiment_id = $1",
+            experiment_id,
+        )
+    group_counts: Dict[str, int] = {}
+    for row in token_rows:
+        group = row["treatment_group"]
+        group_counts[group] = group_counts.get(group, 0) + 1
+
+    if group_counts:
+        seen: set = set()
+        new_token_groups: Dict[str, List[str]] = {}
+        for group, count in group_counts.items():
+            tokens = []
+            for _ in range(count):
+                while True:
+                    t = _generate_token()
+                    if t not in seen:
+                        seen.add(t)
+                        tokens.append(t)
+                        break
+            new_token_groups[group] = tokens
+        await token_manager.seed_tokens(pool, new_id, new_token_groups)
+
+    return {
+        "status": "cloned",
+        "source_experiment_id": experiment_id,
+        "new_experiment_id": new_id,
+    }
+
+
 @app.post("/admin/experiment/{experiment_id}/activate")
 async def admin_activate_experiment(experiment_id: str, x_admin_key: str = Header(None)):
     """Set the active experiment (for dashboard context and session routing)."""
@@ -1058,7 +1117,7 @@ async def admin_list_sessions(
     experiment_id: Optional[str] = None,
     x_admin_key: str = Header(None),
 ):
-    """Return all sessions for an experiment with message counts."""
+    """Return all sessions for an experiment with message and classifier stats."""
     _require_admin(x_admin_key)
     eid = experiment_id or get_experiment_id()
     pool = _get_pool()
@@ -1072,12 +1131,30 @@ async def admin_list_sessions(
                 s.started_at,
                 s.ended_at,
                 s.end_reason,
-                COALESCE(m.msg_count, 0) AS message_count
+                COALESCE(m.msg_count, 0) AS message_count,
+                COALESCE(c.agent_msg_count, 0) AS agent_message_count,
+                COALESCE(c.incivil_count, 0) AS incivil_message_count,
+                COALESCE(c.incivil_classified_count, 0) AS incivil_classified_count,
+                COALESCE(c.like_minded_count, 0) AS like_minded_message_count,
+                COALESCE(c.like_minded_classified_count, 0) AS like_minded_classified_count
             FROM sessions s
             LEFT JOIN (
                 SELECT session_id, COUNT(*) AS msg_count
                 FROM messages GROUP BY session_id
             ) m USING (session_id)
+            LEFT JOIN (
+                SELECT
+                    m.session_id,
+                    COUNT(*) AS agent_msg_count,
+                    COUNT(*) FILTER (WHERE m.is_incivil IS TRUE) AS incivil_count,
+                    COUNT(*) FILTER (WHERE m.is_incivil IS NOT NULL) AS incivil_classified_count,
+                    COUNT(*) FILTER (WHERE m.is_like_minded IS TRUE) AS like_minded_count,
+                    COUNT(*) FILTER (WHERE m.is_like_minded IS NOT NULL) AS like_minded_classified_count
+                FROM messages m
+                JOIN sessions s2 ON s2.session_id = m.session_id
+                WHERE m.sender <> s2.user_name
+                GROUP BY m.session_id
+            ) c USING (session_id)
             WHERE s.experiment_id = $1
             ORDER BY s.started_at DESC NULLS LAST
         """, eid)
@@ -1092,6 +1169,17 @@ async def admin_list_sessions(
                 "ended_at": r["ended_at"].isoformat() if r["ended_at"] else None,
                 "end_reason": r["end_reason"],
                 "message_count": r["message_count"],
+                "agent_message_count": r["agent_message_count"],
+                "incivil_message_count": r["incivil_message_count"],
+                "incivil_classified_count": r["incivil_classified_count"],
+                "like_minded_message_count": r["like_minded_message_count"],
+                "like_minded_classified_count": r["like_minded_classified_count"],
+                "incivil_pct": round(
+                    (r["incivil_message_count"] / r["incivil_classified_count"]) * 100, 1
+                ) if r["incivil_classified_count"] > 0 else None,
+                "like_minded_pct": round(
+                    (r["like_minded_message_count"] / r["like_minded_classified_count"]) * 100, 1
+                ) if r["like_minded_classified_count"] > 0 else None,
             }
             for r in rows
         ]
@@ -1196,6 +1284,98 @@ async def admin_tokens_csv(experiment_id: str, x_admin_key: str = Header(None)):
         ])
     buf.seek(0)
     filename = f"{experiment_id}_tokens.csv"
+    return StreamingResponse(
+        buf,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/admin/sessions/csv/{experiment_id}")
+async def admin_sessions_csv(experiment_id: str, x_admin_key: str = Header(None)):
+    """Download all session data for an experiment as a flat CSV.
+
+    One row per message. Includes experiment parameters, session metadata,
+    and per-message classifier labels for cross-experiment comparison.
+    """
+    _require_admin(x_admin_key)
+    pool = _get_pool()
+
+    async with pool.acquire() as conn:
+        exp_row = await conn.fetchrow(
+            "SELECT experiment_id, description, config FROM experiments WHERE experiment_id = $1",
+            experiment_id,
+        )
+    if not exp_row:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+
+    cfg = exp_row["config"]
+    if isinstance(cfg, str):
+        cfg = json.loads(cfg)
+    sim = cfg.get("simulation", {})
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT
+                s.session_id, s.treatment_group, s.status, s.user_name,
+                s.started_at, s.ended_at, s.end_reason,
+                m.message_id, m.sender, m.content, m.sent_at,
+                m.is_incivil, m.is_like_minded,
+                m.inferred_participant_stance, m.classification_rationale,
+                m.reply_to, m.reported
+            FROM sessions s
+            JOIN messages m ON m.session_id = s.session_id
+            WHERE s.experiment_id = $1
+            ORDER BY s.started_at, m.seq
+        """, experiment_id)
+
+    import csv
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "experiment_id", "description",
+        "director_model", "performer_model", "moderator_model", "classifier_model",
+        "session_duration_minutes", "messages_per_minute", "context_window_size",
+        "session_id", "treatment_group", "session_status",
+        "session_started_at", "session_ended_at", "end_reason",
+        "message_id", "sender", "sender_type", "content", "sent_at",
+        "is_incivil", "is_like_minded",
+        "inferred_participant_stance", "classification_rationale",
+        "reply_to", "reported",
+    ])
+    for r in rows:
+        sender_type = "participant" if r["sender"] == r["user_name"] else "agent"
+        writer.writerow([
+            experiment_id,
+            exp_row["description"] or "",
+            f"{sim.get('director_llm_provider','')}:{sim.get('director_llm_model','')}",
+            f"{sim.get('performer_llm_provider','')}:{sim.get('performer_llm_model','')}",
+            f"{sim.get('moderator_llm_provider','')}:{sim.get('moderator_llm_model','')}",
+            f"{sim.get('classifier_llm_provider','')}:{sim.get('classifier_llm_model','')}",
+            sim.get("session_duration_minutes", ""),
+            sim.get("messages_per_minute", ""),
+            sim.get("context_window_size", ""),
+            str(r["session_id"]),
+            r["treatment_group"],
+            r["status"],
+            r["started_at"].isoformat() if r["started_at"] else "",
+            r["ended_at"].isoformat() if r["ended_at"] else "",
+            r["end_reason"] or "",
+            str(r["message_id"]),
+            r["sender"],
+            sender_type,
+            r["content"],
+            r["sent_at"].isoformat(),
+            r["is_incivil"] if r["is_incivil"] is not None else "",
+            r["is_like_minded"] if r["is_like_minded"] is not None else "",
+            r["inferred_participant_stance"] or "",
+            r["classification_rationale"] or "",
+            str(r["reply_to"]) if r["reply_to"] else "",
+            r["reported"],
+        ])
+
+    buf.seek(0)
+    filename = f"{experiment_id}_sessions.csv"
     return StreamingResponse(
         buf,
         media_type="text/csv",

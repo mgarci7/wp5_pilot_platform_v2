@@ -22,6 +22,11 @@ class Message:
     liked_by: Set[str] = field(default_factory=set)
     # Whether this message has been reported by the (single) human participant
     reported: bool = False
+    # Classifier labels (agent messages only; may be None when unavailable)
+    is_incivil: Optional[bool] = None
+    is_like_minded: Optional[bool] = None
+    inferred_participant_stance: Optional[str] = None
+    classification_rationale: Optional[str] = None
     # Arbitrary extra fields (e.g. scenario seed metadata) included in to_dict()
     metadata: dict = field(default_factory=dict)
     
@@ -33,6 +38,10 @@ class Message:
         reply_to: Optional[str] = None,
         quoted_text: Optional[str] = None,
         mentions: Optional[List[str]] = None,
+        is_incivil: Optional[bool] = None,
+        is_like_minded: Optional[bool] = None,
+        inferred_participant_stance: Optional[str] = None,
+        classification_rationale: Optional[str] = None,
     ) -> "Message":
         """Factory method to create a new message with auto-generated ID and timestamp.
 
@@ -46,6 +55,10 @@ class Message:
             reply_to=reply_to,
             quoted_text=quoted_text,
             mentions=mentions,
+            is_incivil=is_incivil,
+            is_like_minded=is_like_minded,
+            inferred_participant_stance=inferred_participant_stance,
+            classification_rationale=classification_rationale,
         )
     
     def to_dict(self) -> dict:
@@ -63,6 +76,11 @@ class Message:
             "liked_by": list(self.liked_by),
             # Reported flag (single human participant model)
             "reported": self.reported,
+            # Classifier labels
+            "is_incivil": self.is_incivil,
+            "is_like_minded": self.is_like_minded,
+            "inferred_participant_stance": self.inferred_participant_stance,
+            "classification_rationale": self.classification_rationale,
         }
         if self.metadata:
             d.update(self.metadata)

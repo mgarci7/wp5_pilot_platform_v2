@@ -23,6 +23,12 @@ export interface SimulationConfig {
   moderator_temperature: number
   moderator_top_p: number
   moderator_max_tokens: number
+  classifier_llm_provider: string
+  classifier_llm_model: string
+  classifier_temperature: number
+  classifier_top_p: number
+  classifier_max_tokens: number
+  classifier_prompt_template: string
   context_window_size: number
   llm_concurrency_limit: number
 }
@@ -90,6 +96,13 @@ export interface SessionSummary {
   ended_at: string | null
   end_reason: string | null
   message_count: number
+  agent_message_count: number
+  incivil_message_count: number
+  incivil_classified_count: number
+  like_minded_message_count: number
+  like_minded_classified_count: number
+  incivil_pct: number | null
+  like_minded_pct: number | null
 }
 
 export interface TokenGroupStats {

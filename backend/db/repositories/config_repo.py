@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import asyncpg
+from agents.STAGE.classifier import DEFAULT_CLASSIFIER_PROMPT_TEMPLATE
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
@@ -67,30 +68,50 @@ def validate_simulation_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("'max_concurrent_turns' must be > 0")
     out["max_concurrent_turns"] = mct
 
+    # Classifier role defaults to Moderator settings when omitted.
+    out["classifier_llm_provider"] = (
+        out.get("classifier_llm_provider") or out.get("moderator_llm_provider")
+    )
+    out["classifier_llm_model"] = (
+        out.get("classifier_llm_model") or out.get("moderator_llm_model")
+    )
+
     for key in ["director_llm_provider", "director_llm_model",
                  "performer_llm_provider", "performer_llm_model",
-                 "moderator_llm_provider", "moderator_llm_model"]:
+                 "moderator_llm_provider", "moderator_llm_model",
+                 "classifier_llm_provider", "classifier_llm_model"]:
         if not isinstance(out.get(key, ""), str) or not out[key].strip():
             raise ValueError(f"'{key}' must be a non-empty string")
 
-    for k in ["director_temperature", "performer_temperature", "moderator_temperature"]:
-        v = float(out.get(k, 1.0))
+    for k in ["director_temperature", "performer_temperature", "moderator_temperature", "classifier_temperature"]:
+        default = 0.2 if k == "classifier_temperature" else 1.0
+        v = float(out.get(k, default))
         if not (0.0 <= v <= 2.0):
             raise ValueError(f"'{k}' must be between 0.0 and 2.0")
         out[k] = v
 
-    for k in ["director_top_p", "performer_top_p", "moderator_top_p"]:
+    for k in ["director_top_p", "performer_top_p", "moderator_top_p", "classifier_top_p"]:
         v = float(out.get(k, 1.0))
         if not (0.0 <= v <= 1.0):
             raise ValueError(f"'{k}' must be between 0.0 and 1.0")
         out[k] = v
 
-    defaults = {"director_max_tokens": 1024, "performer_max_tokens": 512, "moderator_max_tokens": 256}
+    defaults = {
+        "director_max_tokens": 1024,
+        "performer_max_tokens": 512,
+        "moderator_max_tokens": 256,
+        "classifier_max_tokens": 256,
+    }
     for k, d in defaults.items():
         v = int(out.get(k, d))
         if v <= 0:
             raise ValueError(f"'{k}' must be > 0")
         out[k] = v
+
+    prompt = out.get("classifier_prompt_template", DEFAULT_CLASSIFIER_PROMPT_TEMPLATE)
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("'classifier_prompt_template' must be a non-empty string")
+    out["classifier_prompt_template"] = prompt
 
     cws = int(out["context_window_size"])
     if cws <= 0:
@@ -197,8 +218,19 @@ async def get_experiment_config(
     cfg = row["config"]
     # asyncpg returns JSONB as a string or dict depending on version
     if isinstance(cfg, str):
-        return json.loads(cfg)
-    return dict(cfg) if cfg else None
+        cfg = json.loads(cfg)
+    else:
+        cfg = dict(cfg) if cfg else None
+    if not cfg:
+        return None
+    sim = cfg.get("simulation")
+    if isinstance(sim, dict):
+        try:
+            cfg["simulation"] = validate_simulation_config(sim)
+        except Exception:
+            # Keep stored config unchanged if normalization fails.
+            pass
+    return cfg
 
 
 async def get_experiment(
@@ -218,6 +250,13 @@ async def get_experiment(
     cfg = result.get("config")
     if isinstance(cfg, str):
         result["config"] = json.loads(cfg)
+    if isinstance(result.get("config"), dict):
+        sim = result["config"].get("simulation")
+        if isinstance(sim, dict):
+            try:
+                result["config"]["simulation"] = validate_simulation_config(sim)
+            except Exception:
+                pass
     return result
 
 

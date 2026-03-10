@@ -12,6 +12,8 @@ import {
   getEvents,
   pauseExperiment,
   resumeExperiment,
+  cloneExperiment,
+  downloadSessionsCSV,
 } from "../../lib/admin-api"
 import type { SessionSummary, TokenGroupStats, SimulationConfig, ExperimentalConfig } from "../../lib/admin-types"
 import type { ExperimentSummary, AdminEvent } from "../../lib/admin-api"
@@ -230,12 +232,14 @@ function OverviewTab({
   sessions,
   tokenStats,
   onEdit,
+  onCloned,
 }: {
   adminKey: string
   experimentId: string
   sessions: SessionSummary[]
   tokenStats: TokenGroupStats[]
   onEdit: () => void
+  onCloned: (newId: string) => void
 }) {
   const [config, setConfig] = useState<{
     simulation: SimulationConfig
@@ -244,6 +248,11 @@ function OverviewTab({
   const [description, setDescription] = useState("")
   const [createdAt, setCreatedAt] = useState("")
   const [configLoading, setConfigLoading] = useState(true)
+  const [cloneOpen, setCloneOpen] = useState(false)
+  const [cloneId, setCloneId] = useState("")
+  const [cloneDesc, setCloneDesc] = useState("")
+  const [cloning, setCloning] = useState(false)
+  const [cloneError, setCloneError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -261,6 +270,24 @@ function OverviewTab({
       })
     return () => { cancelled = true }
   }, [adminKey, experimentId])
+
+  const handleClone = async () => {
+    const newId = cloneId.trim()
+    if (!newId) { setCloneError("New experiment ID is required"); return }
+    setCloning(true)
+    setCloneError(null)
+    try {
+      await cloneExperiment(adminKey, experimentId, newId, cloneDesc || undefined)
+      setCloneOpen(false)
+      setCloneId("")
+      setCloneDesc("")
+      onCloned(newId)
+    } catch (e: unknown) {
+      setCloneError(e instanceof Error ? e.message : "Clone failed")
+    } finally {
+      setCloning(false)
+    }
+  }
 
   const activeSessions = sessions.filter((s) => s.status === "active")
   const completedSessions = sessions.filter((s) => s.status === "ended" || s.status === "crashed")
@@ -292,6 +319,55 @@ function OverviewTab({
       {/* Token progress */}
       <TokenProgress stats={tokenStats} />
 
+      {/* Clone modal */}
+      {cloneOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-admin-surface border border-admin-border rounded-xl shadow-2xl p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-sm font-semibold text-admin-text">Clone Experiment</h3>
+            <p className="text-xs text-admin-muted">
+              Creates a copy of <span className="font-mono font-medium">{experimentId}</span> with the same configuration and fresh tokens.
+            </p>
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-admin-muted">New Experiment ID *</label>
+              <input
+                type="text"
+                value={cloneId}
+                onChange={(e) => setCloneId(e.target.value)}
+                placeholder="e.g. experiment_v2"
+                className="w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-bg text-admin-text focus:outline-none focus:border-admin-accent"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-admin-muted">Description (optional)</label>
+              <input
+                type="text"
+                value={cloneDesc}
+                onChange={(e) => setCloneDesc(e.target.value)}
+                placeholder={`Clone of ${experimentId}`}
+                className="w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-bg text-admin-text focus:outline-none focus:border-admin-accent"
+              />
+            </div>
+            {cloneError && <p className="text-xs text-red-500">{cloneError}</p>}
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setCloneOpen(false); setCloneError(null); setCloneId(""); setCloneDesc("") }}
+                className="px-4 py-2 text-xs font-medium text-admin-muted hover:text-admin-text transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClone}
+                disabled={cloning}
+                className="px-4 py-2 text-xs font-medium bg-admin-accent text-white rounded-lg hover:bg-admin-accent-hover transition-colors disabled:opacity-50"
+              >
+                {cloning ? "Cloning…" : "Clone"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Config summary */}
       <div className="bg-admin-surface rounded-lg border border-admin-border overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-admin-border">
@@ -302,6 +378,12 @@ function OverviewTab({
               className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors"
             >
               Edit Experiment
+            </button>
+            <button
+              onClick={() => setCloneOpen(true)}
+              className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors"
+            >
+              Clone Experiment
             </button>
             <button
               onClick={async () => {
@@ -365,7 +447,12 @@ function OverviewTab({
                   <LLMRow role="Director" provider={config.simulation.director_llm_provider} model={config.simulation.director_llm_model} temp={config.simulation.director_temperature} topP={config.simulation.director_top_p} maxTokens={config.simulation.director_max_tokens} />
                   <LLMRow role="Performer" provider={config.simulation.performer_llm_provider} model={config.simulation.performer_llm_model} temp={config.simulation.performer_temperature} topP={config.simulation.performer_top_p} maxTokens={config.simulation.performer_max_tokens} />
                   <LLMRow role="Moderator" provider={config.simulation.moderator_llm_provider} model={config.simulation.moderator_llm_model} temp={config.simulation.moderator_temperature} topP={config.simulation.moderator_top_p} maxTokens={config.simulation.moderator_max_tokens} />
+                  <LLMRow role="Classifier" provider={config.simulation.classifier_llm_provider} model={config.simulation.classifier_llm_model} temp={config.simulation.classifier_temperature} topP={config.simulation.classifier_top_p} maxTokens={config.simulation.classifier_max_tokens} />
                   <ConfigRow label="Concurrency limit" value={config.simulation.llm_concurrency_limit} />
+                  <ConfigRow
+                    label="Classifier prompt"
+                    value={`${(config.simulation.classifier_prompt_template || "").slice(0, 80)}${(config.simulation.classifier_prompt_template || "").length > 80 ? "..." : ""}`}
+                  />
                 </div>
               </div>
 
@@ -404,9 +491,18 @@ function OverviewTab({
 
 /* ── Sessions tab ────────────────────────────────────────────────────────── */
 
-function SessionsTab({ sessions }: { sessions: SessionSummary[] }) {
+function SessionsTab({
+  sessions,
+  adminKey,
+  experimentId,
+}: {
+  sessions: SessionSummary[]
+  adminKey: string
+  experimentId: string
+}) {
   const [statusFilter, setStatusFilter] = useState<string>("")
   const [groupFilter, setGroupFilter] = useState<string>("")
+  const [exporting, setExporting] = useState(false)
 
   const groups = Array.from(new Set(sessions.map((s) => s.treatment_group))).sort()
   const statuses = Array.from(new Set(sessions.map((s) => s.status))).sort()
@@ -420,9 +516,20 @@ function SessionsTab({ sessions }: { sessions: SessionSummary[] }) {
   const activeSessions = filtered.filter((s) => s.status === "active")
   const completedSessions = filtered.filter((s) => s.status !== "active")
 
+  const handleExportCSV = async () => {
+    setExporting(true)
+    try {
+      await downloadSessionsCSV(adminKey, experimentId)
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Export failed")
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
-      {/* Filters */}
+      {/* Filters + Export */}
       <div className="bg-admin-surface rounded-lg border border-admin-border px-4 py-3 flex items-center gap-4 flex-wrap">
         <span className="text-xs font-medium text-admin-faint uppercase tracking-wider">Filters</span>
         <select
@@ -448,6 +555,13 @@ function SessionsTab({ sessions }: { sessions: SessionSummary[] }) {
         <span className="text-xs text-admin-faint ml-auto">
           {filtered.length} of {sessions.length} session{sessions.length !== 1 ? "s" : ""}
         </span>
+        <button
+          onClick={handleExportCSV}
+          disabled={exporting || sessions.length === 0}
+          className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors disabled:opacity-40"
+        >
+          {exporting ? "Exporting…" : "Export CSV"}
+        </button>
       </div>
 
       {sessions.length === 0 ? (
@@ -1038,6 +1152,11 @@ function formatDuration(startedAt: string | null, endedAt: string | null): strin
   return `${mins}:${String(secs).padStart(2, "0")}`
 }
 
+function formatPercent(value: number | null): string {
+  if (value == null || Number.isNaN(value)) return "-"
+  return `${value.toFixed(1)}%`
+}
+
 function SessionTable({
   sessions,
   title,
@@ -1061,6 +1180,8 @@ function SessionTable({
               <th className="px-3 py-1.5">Token</th>
               <th className="px-3 py-1.5">Group</th>
               <th className="px-3 py-1.5 text-right">Msgs</th>
+              <th className="px-3 py-1.5 text-right">% Incivil</th>
+              <th className="px-3 py-1.5 text-right">% Like-minded</th>
               <th className="px-3 py-1.5 text-right">{showEndReason ? "End Reason" : "Duration"}</th>
               <th className="px-3 py-1.5 text-right">Report</th>
             </tr>
@@ -1072,6 +1193,8 @@ function SessionTable({
                 <td className="px-3 py-1.5 font-mono text-admin-faint">{s.token}</td>
                 <td className="px-3 py-1.5 font-mono text-admin-faint">{s.treatment_group}</td>
                 <td className="px-3 py-1.5 text-right font-medium text-admin-text">{s.message_count}</td>
+                <td className="px-3 py-1.5 text-right text-admin-muted">{formatPercent(s.incivil_pct)}</td>
+                <td className="px-3 py-1.5 text-right text-admin-muted">{formatPercent(s.like_minded_pct)}</td>
                 <td className="px-3 py-1.5 text-right text-admin-muted">
                   {showEndReason ? (s.end_reason || "-") : formatDuration(s.started_at, s.ended_at)}
                 </td>
@@ -1259,10 +1382,18 @@ export default function Dashboard({ adminKey, onOpenWizard, onEditExperiment, sa
                     sessions={sessions}
                     tokenStats={tokenStats}
                     onEdit={() => onEditExperiment(selectedExperimentId)}
+                    onCloned={(newId) => {
+                      refreshExperiments()
+                      setSelectedExperimentId(newId)
+                    }}
                   />
                 )}
                 {activeTab === "sessions" && (
-                  <SessionsTab sessions={sessions} />
+                  <SessionsTab
+                    sessions={sessions}
+                    adminKey={adminKey}
+                    experimentId={selectedExperimentId}
+                  />
                 )}
                 {activeTab === "logs" && (
                   <EventLogTab

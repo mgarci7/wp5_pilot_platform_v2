@@ -16,12 +16,13 @@ interface StepLLMProps {
   onTestResult?: (role: Role, ok: boolean) => void
 }
 
-type Role = "director" | "performer" | "moderator"
+type Role = "director" | "performer" | "moderator" | "classifier"
 
 const ROLE_DESCRIPTIONS: Record<Role, string> = {
   director: "Decides which agent acts, selects the action type, and provides structured instructions to the Performer.",
   performer: "Generates the actual chatroom message based on the Director's instructions.",
   moderator: "Extracts clean message content from the Performer's raw output. A fast, cheap model is ideal.",
+  classifier: "Evaluates each final agent message as incivil/civil and like-minded/not like-minded against the participant's inferred stance.",
 }
 
 const inputClass = "w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
@@ -311,17 +312,27 @@ export default function StepLLM({ config, onChange, llmProviders, providerModels
     })
   }
 
+  const copyModeratorToClassifier = () => {
+    onChange({
+      classifier_llm_provider: config.moderator_llm_provider,
+      classifier_llm_model: config.moderator_llm_model,
+      classifier_temperature: config.moderator_temperature,
+      classifier_top_p: config.moderator_top_p,
+      classifier_max_tokens: config.moderator_max_tokens,
+    })
+  }
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-admin-text">LLM Pipeline</h2>
         <p className="text-sm text-admin-muted mt-1">
-          Configure the Director, Performer, and Moderator models.
+          Configure the Director, Performer, Moderator, and Classifier models.
         </p>
       </div>
 
       <div className="space-y-3">
-        {(["director", "performer", "moderator"] as Role[]).map((role) => (
+        {(["director", "performer", "moderator", "classifier"] as Role[]).map((role) => (
           <LLMRoleConfig
             key={role}
             role={role}
@@ -345,9 +356,15 @@ export default function StepLLM({ config, onChange, llmProviders, providerModels
         >
           Copy Director settings to Performer
         </button>
+        <button
+          onClick={copyModeratorToClassifier}
+          className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover underline underline-offset-2 transition-colors"
+        >
+          Copy Moderator settings to Classifier
+        </button>
       </div>
 
-      <div className="bg-admin-surface rounded-lg border border-admin-border p-5">
+      <div className="bg-admin-surface rounded-lg border border-admin-border p-5 space-y-4">
         <h3 className="text-sm font-semibold text-admin-muted uppercase tracking-wider mb-3">Shared</h3>
         <div>
           <label className="block text-xs font-medium text-admin-muted mb-1">
@@ -360,7 +377,22 @@ export default function StepLLM({ config, onChange, llmProviders, providerModels
             onChange={(e) => onChange({ llm_concurrency_limit: Math.max(1, parseInt(e.target.value) || 1) })}
             className="w-24 px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
           />
-          <p className="text-xs text-admin-faint mt-1">Limits simultaneous requests to each LLM provider (Director, Performer, Moderator independently). Increase for faster throughput; decrease if hitting API rate limits</p>
+          <p className="text-xs text-admin-faint mt-1">Limits simultaneous requests to each LLM provider (Director, Performer, Moderator, Classifier independently). Increase for faster throughput; decrease if hitting API rate limits.</p>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-admin-muted mb-1">
+            Classifier Prompt Template
+          </label>
+          <textarea
+            value={config.classifier_prompt_template || ""}
+            onChange={(e) => onChange({ classifier_prompt_template: e.target.value })}
+            rows={10}
+            className={`${inputClass} font-mono text-xs`}
+          />
+          <p className="text-xs text-admin-faint mt-1">
+            Available placeholders: <code>{"{PARTICIPANT_MESSAGES}"}</code>, <code>{"{AGENT_MESSAGE}"}</code>, <code>{"{CHATROOM_CONTEXT}"}</code>.
+          </p>
         </div>
       </div>
     </div>

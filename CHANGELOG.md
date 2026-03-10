@@ -65,3 +65,82 @@ docker compose up --build
 ```
 
 Access the admin panel at: `http://localhost:3000/admin`
+
+---
+
+## [1.0.0] - Previous Fixes
+
+### 1. Inconsistent Agent Personalities
+
+**Problem:** Agents contradicted themselves and did not maintain coherent behavior during conversation.
+
+**Cause:** The system only had agent names without defining individual personalities. The Director had no information to maintain consistency.
+
+**Solution:**
+- Added `persona` field to Agent model
+- Modified Director prompt to include personalities
+- Added UI in Admin Panel to define personalities per agent
+- Explicit instruction to Director: "Maintain consistency - each agent should stay true to their personality traits"
+
+**Files modified:**
+- `backend/models/agent.py`
+- `backend/agents/STAGE/director.py`
+- `backend/platforms/chatroom.py`
+- `frontend/lib/admin-types.ts`
+- `frontend/components/admin/steps/StepSession.tsx`
+- `frontend/components/admin/AdminPanel.tsx`
+
+---
+
+### 2. Tedious Experiment Configuration
+
+**Problem:** All fields had to be filled manually each time, very slow for testing.
+
+**Solution:** Pre-configured default values:
+- 4 agents with defined names and personalities (Carlos, Maria, Pedro, Laura)
+- 2x2 design already created (civil_pro, civil_against, incivil_pro, incivil_against)
+- Pre-configured LLMs (Anthropic Director, HuggingFace Performer/Moderator)
+- Pre-filled chatroom context
+
+---
+
+### 3. Uncensored Model for Uncivil Content
+
+**Problem:** Models like Claude may refuse to generate very aggressive content.
+
+**Solution:** Configured `dphn/Dolphin-Mistral-24B-Venice-Edition` as default Performer (uncensored model via HuggingFace/Featherless AI).
+
+---
+
+### 4. HuggingFace Token Not Loaded
+
+**Problem:** Error "Cannot select auto-router when using non-Hugging Face API key"
+
+**Cause:** Docker container did not reload environment variables with `docker compose restart`.
+
+**Solution:** Use `docker compose up -d --force-recreate app` to force `.env` reload.
+
+---
+
+## Recommended LLM Configuration
+
+| Role | Provider | Model | Reason |
+|------|----------|-------|--------|
+| Director | Anthropic | claude-sonnet-4-20250514 | Good at reasoning and deciding |
+| Performer | HuggingFace | Dolphin-Mistral-24B:featherless-ai | Uncensored |
+| Moderator | HuggingFace | Llama-3.1-8B-Instruct | Fast and cheap |
+
+---
+
+## Useful Commands
+
+```bash
+# Rebuild and launch
+docker compose up -d --build
+
+# View backend logs
+docker compose logs app --tail=100
+
+# Restart with new environment variables
+docker compose up -d --force-recreate app
+```

@@ -238,11 +238,18 @@ wait_http() {
 
 open_url() {
   local url="$1"
-  if command_exists xdg-open; then
-    xdg-open "$url" >/dev/null 2>&1 || true
-  elif command_exists gio; then
-    gio open "$url" >/dev/null 2>&1 || true
+  log "Opening $url ..."
+  # Try xdg-open first; if it fails (e.g. no DBUS in terminal), fall back to direct browser
+  if command_exists xdg-open && xdg-open "$url" >/dev/null 2>&1; then
+    return
   fi
+  for browser in google-chrome google-chrome-stable chromium-browser firefox firefox-esr; do
+    if command_exists "$browser"; then
+      "$browser" "$url" >/dev/null 2>&1 &
+      return
+    fi
+  done
+  log "Could not open browser automatically. Please visit: $url"
 }
 
 main() {

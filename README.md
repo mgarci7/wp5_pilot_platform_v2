@@ -93,14 +93,24 @@ After saving an experiment, the admin panel switches to a monitoring dashboard w
 
 ![Admin Dashboard](https://github.com/user-attachments/assets/8adf5502-a030-4294-8461-ac7dd7324096)
 
-- **Overview** — live statistics, per-group enrollment, experimental configuration, and CSV token download.
-- **Sessions** — table of all sessions with status, treatment group, token, timestamps, duration, and message count.
+- **Overview** — live statistics, per-group enrollment, experimental configuration, CSV token download, and quick actions to edit or duplicate an experiment as a new editable draft.
+- **Sessions** — table of all sessions with status, treatment group, token, timestamps, duration, and message count, plus export links (HTML report and CSV for ended sessions).
 - **Logs** — real-time event stream, filterable by event type, with error highlighting.
 - **Settings** — pause and resume enrollment, danger zone for resetting sessions (keeps config and tokens) or permanently deleting an experiment and all its data; both require typing the experiment ID to confirm.
 
 The dashboard polls the backend continuously so no manual refresh is needed.
 
 If you have multiple experiments, you can switch between them using the dropdown in the header. 
+
+### Session CSV export for annotation
+
+When a session ends, the backend automatically writes an annotation-ready CSV with one row per chat message.
+
+- Default output directory: `backend/exports/session_csv/`
+- Filename format: `<session_id>.csv`
+- Columns: `message`, `incivility`, `hate_speech`, `threats_to_dem_freedom`, `impoliteness`, `stance`, `human_like`, `other`
+
+You can override the output directory with the `SESSION_CSV_EXPORT_DIR` environment variable.
 
 
 ## API Endpoints
@@ -112,6 +122,7 @@ If you have multiple experiments, you can switch between them using the dropdown
 | `POST` | `/session/{id}/message/{mid}/like` | Toggle a like on a message |
 | `POST` | `/session/{id}/message/{mid}/report` | Report a message (optionally block sender) |
 | `GET` | `/session/{id}/report` | Generate an HTML session report from the DB |
+| `GET` | `/session/{id}/messages-csv` | Download annotation CSV for session messages |
 | `GET` | `/health` | Health check |
 
 ### Admin Endpoints

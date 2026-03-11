@@ -22,6 +22,7 @@ interface DashboardProps {
   adminKey: string
   onOpenWizard: () => void
   onEditExperiment: (experimentId: string) => void
+  onDuplicateExperiment: (experimentId: string) => void
   saveBanner: string | null
   onDismissBanner: () => void
   theme: AdminTheme
@@ -230,12 +231,14 @@ function OverviewTab({
   sessions,
   tokenStats,
   onEdit,
+  onDuplicate,
 }: {
   adminKey: string
   experimentId: string
   sessions: SessionSummary[]
   tokenStats: TokenGroupStats[]
   onEdit: () => void
+  onDuplicate: () => void
 }) {
   const [config, setConfig] = useState<{
     simulation: SimulationConfig
@@ -302,6 +305,12 @@ function OverviewTab({
               className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors"
             >
               Edit Experiment
+            </button>
+            <button
+              onClick={onDuplicate}
+              className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors"
+            >
+              Duplicate Experiment
             </button>
             <button
               onClick={async () => {
@@ -1062,7 +1071,7 @@ function SessionTable({
               <th className="px-3 py-1.5">Group</th>
               <th className="px-3 py-1.5 text-right">Msgs</th>
               <th className="px-3 py-1.5 text-right">{showEndReason ? "End Reason" : "Duration"}</th>
-              <th className="px-3 py-1.5 text-right">Report</th>
+              <th className="px-3 py-1.5 text-right">Exports</th>
             </tr>
           </thead>
           <tbody>
@@ -1076,14 +1085,26 @@ function SessionTable({
                   {showEndReason ? (s.end_reason || "-") : formatDuration(s.started_at, s.ended_at)}
                 </td>
                 <td className="px-3 py-1.5 text-right">
-                  <a
-                    href={`${API_BASE}/session/${s.session_id}/report`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-admin-accent hover:text-admin-accent-hover font-medium"
-                  >
-                    View
-                  </a>
+                  <div className="inline-flex items-center gap-2">
+                    <a
+                      href={`${API_BASE}/session/${s.session_id}/report`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-admin-accent hover:text-admin-accent-hover font-medium"
+                    >
+                      View
+                    </a>
+                    {s.status === "ended" || s.status === "crashed" ? (
+                      <a
+                        href={`${API_BASE}/session/${s.session_id}/messages-csv`}
+                        className="text-admin-accent hover:text-admin-accent-hover font-medium"
+                      >
+                        CSV
+                      </a>
+                    ) : (
+                      <span className="text-admin-faint">CSV</span>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -1122,7 +1143,7 @@ function TokenProgress({ stats }: { stats: TokenGroupStats[] }) {
 
 /* ── Main Dashboard ───────────────────────────────────────────────────────── */
 
-export default function Dashboard({ adminKey, onOpenWizard, onEditExperiment, saveBanner, onDismissBanner, theme, onToggleTheme }: DashboardProps) {
+export default function Dashboard({ adminKey, onOpenWizard, onEditExperiment, onDuplicateExperiment, saveBanner, onDismissBanner, theme, onToggleTheme }: DashboardProps) {
   const [experiments, setExperiments] = useState<ExperimentSummary[]>([])
   const [selectedExperimentId, setSelectedExperimentId] = useState("")
   const [sessions, setSessions] = useState<SessionSummary[]>([])
@@ -1259,6 +1280,7 @@ export default function Dashboard({ adminKey, onOpenWizard, onEditExperiment, sa
                     sessions={sessions}
                     tokenStats={tokenStats}
                     onEdit={() => onEditExperiment(selectedExperimentId)}
+                    onDuplicate={() => onDuplicateExperiment(selectedExperimentId)}
                   />
                 )}
                 {activeTab === "sessions" && (

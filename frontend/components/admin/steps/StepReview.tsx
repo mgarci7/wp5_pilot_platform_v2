@@ -66,6 +66,12 @@ export default function StepReview({
         </div>
       )}
 
+      {saving && (
+        <div className="bg-admin-pastel-blue border border-admin-border rounded-lg px-4 py-3">
+          <p className="text-sm text-admin-text">Saving configuration...</p>
+        </div>
+      )}
+
       <Section title="Experiment">
         <KV label="Experiment ID" value={experimentId || "(not set)"} />
         <KV label="Starts at" value={startsAt ? new Date(startsAt).toLocaleString() : "(not set)"} />

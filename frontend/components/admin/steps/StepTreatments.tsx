@@ -175,7 +175,8 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
   }
 
   const removeGroup = (name: string) => {
-    const { [name]: _, ...rest } = config.groups
+    const rest = { ...config.groups }
+    delete rest[name]
     onChange({ ...config, groups: rest })
   }
 

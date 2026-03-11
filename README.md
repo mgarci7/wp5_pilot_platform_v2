@@ -40,6 +40,22 @@ docker compose up
 
 The backend will be available at `http://localhost:8000` and the frontend at `http://localhost:3000`.
 
+### One-click launchers (Linux / macOS / Windows)
+
+These launchers are intended for double-click/run usage:
+- check if Docker + Docker Compose are available
+- try to install missing dependencies
+- create `.env` from `.env.example` if missing
+- run `docker compose up -d --build`
+- open the admin and participant URLs in your browser
+- print the initial admin passphrase
+
+[![Linux](https://img.shields.io/badge/Launcher-Linux-2ea44f?logo=linux&logoColor=white)](scripts/start-linux.sh)
+[![macOS](https://img.shields.io/badge/Launcher-macOS-1f2328?logo=apple&logoColor=white)](scripts/start-macos.command)
+[![Windows](https://img.shields.io/badge/Launcher-Windows-0078d4?logo=windows&logoColor=white)](scripts/start-windows.bat)
+
+Default first admin passphrase in the template is `changeme` (`.env.example`).
+
 ### Production deployment
 
 For hosting on a server where participants will access the platform over the internet:

@@ -55,11 +55,14 @@ class Logger:
         experimental_config: dict,
         simulation_config: dict,
         treatment_group: str,
+        *,
+        chatroom_context: str = "",
     ) -> None:
         self.log_event("session_start", {
             "treatment_group": treatment_group,
             "experimental_config": experimental_config,
             "simulation_config": simulation_config,
+            "chatroom_context": chatroom_context,
         })
 
     def log_session_end(self, reason: str = "completed") -> None:

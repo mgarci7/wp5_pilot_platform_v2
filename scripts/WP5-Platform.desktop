@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Name=WP5 Platform
+Comment=Launch WP5 Pilot Platform (Docker)
+Exec=bash -c 'cd "$(dirname "$(readlink -f "%k")")/.." && bash scripts/start-linux.sh'
+Path=%k
+Terminal=true
+Type=Application
+Icon=utilities-terminal
+Categories=Application;
+StartupNotify=true

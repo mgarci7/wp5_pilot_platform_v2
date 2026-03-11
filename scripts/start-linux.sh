@@ -5,17 +5,26 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 # If not running in a terminal (e.g. double-clicked in file manager), relaunch in one
-if [ ! -t 0 ]; then
-  for term in gnome-terminal xterm konsole xfce4-terminal lxterminal mate-terminal tilix; do
+if [ ! -t 0 ] && [ -z "${_WP5_IN_TERMINAL:-}" ]; then
+  export _WP5_IN_TERMINAL=1
+  SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+  for term in ptyxis gnome-terminal xfce4-terminal konsole lxterminal mate-terminal tilix xterm; do
     if command -v "$term" >/dev/null 2>&1; then
       case "$term" in
-        gnome-terminal) exec "$term" -- bash "$0" "$@" ;;
-        xterm|lxterminal|mate-terminal|tilix) exec "$term" -e bash "$0" "$@" ;;
-        konsole) exec "$term" -e bash "$0" "$@" ;;
-        xfce4-terminal) exec "$term" -x bash "$0" "$@" ;;
+        ptyxis)         exec "$term" -- bash "$SELF" "$@" ;;
+        gnome-terminal) exec "$term" --wait -- bash "$SELF" "$@" ;;
+        xfce4-terminal) exec "$term" -x bash "$SELF" "$@" ;;
+        *)              exec "$term" -e bash "$SELF" "$@" ;;
       esac
     fi
   done
+  # Fallback: freedesktop standard
+  if command -v xdg-terminal-exec >/dev/null 2>&1; then
+    exec xdg-terminal-exec bash "$SELF" "$@"
+  fi
+  # Last resort: show error dialog
+  zenity --error --text="No terminal emulator found.\nInstall gnome-terminal or xterm and try again." 2>/dev/null || true
+  exit 1
 fi
 
 cd "$REPO_ROOT"

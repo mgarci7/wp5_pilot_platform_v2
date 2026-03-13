@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
 import type { ExperimentalConfig, TreatmentGroup, SeedArticle, FeatureMeta } from "../../../lib/admin-types"
+import { createExperimental3x3Preset } from "../../../lib/treatment-presets"
 
 interface StepTreatmentsProps {
   config: ExperimentalConfig
@@ -157,10 +157,6 @@ function GroupCard({
 }
 
 export default function StepTreatments({ config, onChange, availableFeatures }: StepTreatmentsProps) {
-  const [showBuilder, setShowBuilder] = useState(false)
-  const [dimA, setDimA] = useState({ name: "", levels: ["", ""] })
-  const [dimB, setDimB] = useState({ name: "", levels: ["", ""] })
-
   const groupEntries = Object.entries(config.groups)
 
   const addGroup = () => {
@@ -198,19 +194,13 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
     })
   }
 
-  const generate2x2 = () => {
-    const groups: Record<string, TreatmentGroup> = {}
-    for (const a of dimA.levels) {
-      for (const b of dimB.levels) {
-        const slug = `${a}_${b}`.toLowerCase().replace(/[^a-z0-9_]/g, "_")
-        groups[slug] = {
-          features: [],
-          treatment: "",
-        }
-      }
-    }
-    onChange({ ...config, groups })
-    setShowBuilder(false)
+  const apply3x3Preset = () => {
+    const preset = createExperimental3x3Preset()
+    onChange({
+      ...config,
+      chatroom_context: preset.chatroom_context,
+      groups: preset.groups,
+    })
   }
 
   return (
@@ -234,13 +224,12 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
         <p className="text-xs text-admin-faint mt-1">Shared across all treatment groups. Injected into the Director prompt.</p>
       </div>
 
-      {/* 2x2 builder */}
       <div className="flex items-center gap-3">
         <button
-          onClick={() => setShowBuilder(!showBuilder)}
+          onClick={apply3x3Preset}
           className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover underline underline-offset-2 transition-colors"
         >
-          {showBuilder ? "Hide 2\u00d72 builder" : "Generate 2\u00d72 design"}
+          Cargar diseño 3×3 predefinido
         </button>
         <button
           onClick={addGroup}
@@ -249,74 +238,6 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
           + Add group manually
         </button>
       </div>
-
-      {showBuilder && (
-        <div className="bg-admin-accent-soft rounded-lg border border-admin-accent-muted p-5 space-y-3">
-          <p className="text-xs font-medium text-admin-accent">
-            Generate a 2x2 factorial design. This will replace all existing groups.
-          </p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-admin-muted mb-1">Dimension A</label>
-              <input
-                type="text"
-                value={dimA.name}
-                onChange={(e) => setDimA({ ...dimA, name: e.target.value })}
-                placeholder="e.g. civility"
-                className={`${inputClass} mb-2`}
-              />
-              <div className="flex gap-2">
-                {dimA.levels.map((level, i) => (
-                  <input
-                    key={i}
-                    type="text"
-                    value={level}
-                    onChange={(e) => {
-                      const levels = [...dimA.levels]
-                      levels[i] = e.target.value
-                      setDimA({ ...dimA, levels })
-                    }}
-                    placeholder={`Level ${i + 1}`}
-                    className="flex-1 px-2 py-1 border border-admin-border rounded text-xs bg-admin-surface text-admin-text"
-                  />
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-admin-muted mb-1">Dimension B</label>
-              <input
-                type="text"
-                value={dimB.name}
-                onChange={(e) => setDimB({ ...dimB, name: e.target.value })}
-                placeholder="e.g. stance"
-                className={`${inputClass} mb-2`}
-              />
-              <div className="flex gap-2">
-                {dimB.levels.map((level, i) => (
-                  <input
-                    key={i}
-                    type="text"
-                    value={level}
-                    onChange={(e) => {
-                      const levels = [...dimB.levels]
-                      levels[i] = e.target.value
-                      setDimB({ ...dimB, levels })
-                    }}
-                    placeholder={`Level ${i + 1}`}
-                    className="flex-1 px-2 py-1 border border-admin-border rounded text-xs bg-admin-surface text-admin-text"
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={generate2x2}
-            className="px-4 py-1.5 text-xs font-medium bg-admin-accent text-white rounded-lg hover:bg-admin-accent-hover transition-colors"
-          >
-            Generate 4 groups
-          </button>
-        </div>
-      )}
 
       {/* Group cards */}
       <div className="space-y-4">
@@ -335,7 +256,7 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
 
       {groupEntries.length === 0 && (
         <div className="text-center py-8 text-admin-faint text-sm">
-          No treatment groups defined. Add one manually or use the 2x2 builder.
+          No treatment groups defined. Add one manually or load the 3×3 preset.
         </div>
       )}
     </div>

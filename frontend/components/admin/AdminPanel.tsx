@@ -11,6 +11,7 @@ import StepTreatments from "./steps/StepTreatments"
 import StepTokens from "./steps/StepTokens"
 import StepReview from "./steps/StepReview"
 import { getMeta, saveConfig, updateConfig, listExperiments, getExperimentConfig } from "../../lib/admin-api"
+import { createExperimental3x3Preset } from "../../lib/treatment-presets"
 import type {
   SimulationConfig,
   ExperimentalConfig,
@@ -30,12 +31,7 @@ const DEFAULT_SIMULATION: SimulationConfig = {
   session_duration_minutes: 10,
   num_agents: 4,
   agent_names: ["Carlos", "Maria", "Pedro", "Laura"],
-  agent_personas: [
-    "Hombre de 45 anos, trabajador de fabrica, conservador, pragmatico, usa lenguaje directo y coloquial, a veces sarcastico. Le frustra la politica pero opina con firmeza.",
-    "Mujer de 32 anos, profesora universitaria, progresista, argumentativa, usa datos y referencias. Paciente pero firme en sus convicciones.",
-    "Hombre de 28 anos, programador, libertario, esceptico, usa humor negro e ironia. Cuestiona todo y desconfia de las instituciones.",
-    "Mujer de 55 anos, ama de casa, moderada, emocional, habla desde la experiencia personal. Busca el consenso pero defiende sus valores tradicionales."
-  ],
+  agent_personas: [],
   messages_per_minute: 4,
   max_concurrent_turns: 2,
   director_llm_provider: "anthropic",
@@ -75,29 +71,6 @@ Return ONLY a JSON object with keys:
 - rationale (short text)`,
   context_window_size: 15,
   llm_concurrency_limit: 5,
-}
-
-const DEFAULT_EXPERIMENTAL: ExperimentalConfig = {
-  chatroom_context: "Chatroom de discusion sobre temas politicos y sociales de actualidad. Los participantes son ciudadanos adultos con interes en el debate publico. El tono es informal, similar a Reddit o Twitter.",
-  redirect_url: "",
-  groups: {
-    civil_pro: {
-      features: [],
-      treatment: "Los agentes deben comportarse de manera CIVIL y estar DE ACUERDO (PRO) con las opiniones del participante humano. Deben: validar y reforzar los puntos del participante, anadir argumentos que apoyen su posicion, mostrar entusiasmo moderado, expresar desacuerdos menores de forma constructiva si es necesario para parecer realistas, usar lenguaje informal pero cordial, sin ataques personales."
-    },
-    civil_against: {
-      features: [],
-      treatment: "Los agentes deben comportarse de manera CIVIL pero estar EN DESACUERDO (AGAINST) con las opiniones del participante humano. Deben: cuestionar respetuosamente los argumentos del participante, ofrecer contraargumentos basados en hechos o perspectivas alternativas, reconocer parcialmente los puntos validos antes de disentir, evitar ataques personales y mantener el foco en las ideas, usar lenguaje informal pero cordial."
-    },
-    incivil_pro: {
-      features: [],
-      treatment: "Los agentes deben comportarse de manera INCIVIL y estar DE ACUERDO (PRO) con las opiniones del participante humano. Deben: apoyar al participante mientras atacan agresivamente a quienes piensan diferente, usar lenguaje despectivo hacia los que no comparten la opinion, validar al participante con entusiasmo agresivo, crear un ambiente de nosotros vs ellos, usar sarcasmo y condescendencia hacia opiniones contrarias, menospreciar la inteligencia de quienes disienten."
-    },
-    incivil_against: {
-      features: [],
-      treatment: "Los agentes deben comportarse de manera INCIVIL y estar EN DESACUERDO (AGAINST) con las opiniones del participante humano. Deben: atacar directamente las opiniones del participante con desprecio, usar sarcasmo agresivo y condescendencia, cuestionar la inteligencia o conocimiento del participante, desestimar sus argumentos sin considerarlos seriamente, usar generalizaciones negativas, mostrar frustracion e indignacion, interrumpir y hablar sobre el participante ignorando sus puntos."
-    },
-  },
 }
 
 const DEFAULT_TOKENS: TokenConfig = { groups: {} }
@@ -154,14 +127,14 @@ export default function AdminPanel() {
 
   // Wizard state
   const [step, setStep] = useState(0)
-  const [experimentId, setExperimentId] = useState("experimento_2x2_civility")
-  const [description, setDescription] = useState("Estudio 2x2: Civilidad (civil/incivil) x Postura (pro/against). Investigacion sobre interacciones humano-IA en entornos de discusion politica.")
+  const [experimentId, setExperimentId] = useState("experimento_3x3_civility")
+  const [description, setDescription] = useState("Estudio 3x3: Incivilidad (20/50/80) x Alineamiento (20/50/80 like-minded).")
   const [startsAt, setStartsAt] = useState(() => defaultSchedule().startsAt)
   const [endsAt, setEndsAt] = useState(() => defaultSchedule().endsAt)
 
   // Config state — initialized with frontend defaults for new experiments
   const [simulation, setSimulation] = useState<SimulationConfig>(DEFAULT_SIMULATION)
-  const [experimental, setExperimental] = useState<ExperimentalConfig>(DEFAULT_EXPERIMENTAL)
+  const [experimental, setExperimental] = useState<ExperimentalConfig>(() => createExperimental3x3Preset())
   const [tokens, setTokens] = useState<TokenConfig>(DEFAULT_TOKENS)
   const [meta, setMeta] = useState<AdminMeta | null>(null)
 
@@ -344,10 +317,10 @@ export default function AdminPanel() {
   const handleOpenWizard = useCallback(() => {
     // Reset wizard to fresh defaults for a new experiment
     setSimulation({ ...DEFAULT_SIMULATION })
-    setExperimental({ ...DEFAULT_EXPERIMENTAL })
+    setExperimental(createExperimental3x3Preset())
     setTokens({ ...DEFAULT_TOKENS })
     setExperimentId(`experimento_${Date.now()}`)
-    setDescription("Estudio 2x2: Civilidad (civil/incivil) x Postura (pro/against). Investigacion sobre interacciones humano-IA.")
+    setDescription("Estudio 3x3: Incivilidad (20/50/80) x Alineamiento (20/50/80 like-minded).")
     const sched = defaultSchedule()
     setStartsAt(sched.startsAt)
     setEndsAt(sched.endsAt)

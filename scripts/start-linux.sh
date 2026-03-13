@@ -263,17 +263,23 @@ main() {
   log "Starting platform with docker compose..."
   docker compose up -d --build
 
-  local admin_url="http://localhost:3000/admin"
+  local frontend_port app_port
+  frontend_port="$(env_value FRONTEND_PORT .env)"
+  app_port="$(env_value APP_PORT .env)"
+  frontend_port="${frontend_port:-3000}"
+  app_port="${app_port:-8000}"
+
+  local admin_url="http://localhost:${frontend_port}/admin"
   local domain
   domain="$(env_value DOMAIN .env)"
-  local participant_url="http://localhost:3000"
+  local participant_url="http://localhost:${frontend_port}"
   if [[ -n "$domain" && "$domain" != "localhost" ]]; then
     participant_url="https://${domain}"
   fi
 
   log "Waiting for frontend and backend..."
-  wait_http "http://localhost:3000" || true
-  wait_http "http://localhost:8000/health" || true
+  wait_http "http://localhost:${frontend_port}" || true
+  wait_http "http://localhost:${app_port}/health" || true
 
   open_url "$admin_url"
   open_url "$participant_url"

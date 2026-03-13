@@ -124,6 +124,64 @@ export default function EvaluateTab({
     URL.revokeObjectURL(url)
   }
 
+  const handleDownloadSummaryCSV = () => {
+    const totals = rows.reduce(
+      (acc, r) => {
+        acc.total_messages += 1
+        if (r.incivility) acc.incivility_count += 1
+        if (r.hate_speech) acc.hate_speech_count += 1
+        if (r.threats_to_dem_freedom) acc.threats_to_democracy_count += 1
+        if (r.impoliteness) acc.impoliteness_count += 1
+        return acc
+      },
+      {
+        total_messages: 0,
+        incivility_count: 0,
+        hate_speech_count: 0,
+        threats_to_democracy_count: 0,
+        impoliteness_count: 0,
+      },
+    )
+
+    const pct = (value: number, total: number) => (total > 0 ? `${((value / total) * 100).toFixed(1)}%` : "")
+
+    const header = [
+      "session_id",
+      "experiment_id",
+      "n_messages",
+      "n_incivility",
+      "n_hate_speech",
+      "n_impoliteness",
+      "n_threats_to_democracy",
+      "perc_incivility",
+      "perc_hate_speech",
+      "perc_impoliteness",
+      "perc_threats_to_democracy",
+    ]
+    const row = [
+      selectedSessionId || "",
+      experimentId,
+      String(totals.total_messages),
+      String(totals.incivility_count),
+      String(totals.hate_speech_count),
+      String(totals.impoliteness_count),
+      String(totals.threats_to_democracy_count),
+      pct(totals.incivility_count, totals.total_messages),
+      pct(totals.hate_speech_count, totals.total_messages),
+      pct(totals.impoliteness_count, totals.total_messages),
+      pct(totals.threats_to_democracy_count, totals.total_messages),
+    ]
+
+    const csv = [header, row].map((line) => line.map((v) => csvEscape(v)).join(",")).join("\n")
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${selectedSessionId || "session"}_summary.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="space-y-4">
       <div className="bg-admin-surface rounded-lg border border-admin-border px-4 py-3 flex items-center gap-3 flex-wrap">
@@ -150,6 +208,13 @@ export default function EvaluateTab({
           className="px-3 py-1.5 text-xs font-medium bg-admin-accent text-white rounded-lg hover:bg-admin-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Download evaluation CSV
+        </button>
+        <button
+          onClick={handleDownloadSummaryCSV}
+          disabled={rows.length === 0}
+          className="px-3 py-1.5 text-xs font-medium border border-admin-border text-admin-text rounded-lg hover:bg-admin-border/30 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Download summary CSV
         </button>
       </div>
 

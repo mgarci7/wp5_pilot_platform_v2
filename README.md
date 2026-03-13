@@ -54,6 +54,7 @@ Pasos mínimos:
 3. Crea un acceso directo en el escritorio al launcher y úsalo para futuros arranques.
 
 > Requisito: Docker + Docker Compose instalados.
+> Si `8000` o `3000` están ocupados, cambia `APP_PORT` y/o `FRONTEND_PORT` en `.env`.
 
 ### Production deployment
 

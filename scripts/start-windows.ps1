@@ -212,16 +212,21 @@ Ensure-DockerRunning
 Write-Log "Starting platform with docker compose..."
 docker compose up -d --build
 
-$adminUrl = "http://localhost:3000/admin"
+$frontendPort = Get-EnvValue -Key "FRONTEND_PORT" -Path ".env"
+if (-not $frontendPort) { $frontendPort = "3000" }
+$appPort = Get-EnvValue -Key "APP_PORT" -Path ".env"
+if (-not $appPort) { $appPort = "8000" }
+
+$adminUrl = "http://localhost:$frontendPort/admin"
 $domain = Get-EnvValue -Key "DOMAIN" -Path ".env"
-$participantUrl = "http://localhost:3000"
+$participantUrl = "http://localhost:$frontendPort"
 if ($domain -and $domain -ne "localhost") {
     $participantUrl = "https://$domain"
 }
 
 Write-Log "Waiting for frontend and backend..."
-Wait-Http -Url "http://localhost:3000"
-Wait-Http -Url "http://localhost:8000/health"
+Wait-Http -Url "http://localhost:$frontendPort"
+Wait-Http -Url "http://localhost:$appPort/health"
 
 Start-Process $adminUrl
 Start-Process $participantUrl

@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import type { SimulationConfig } from "../../../lib/admin-types"
 
 interface StepSessionProps {
@@ -11,6 +12,14 @@ interface StepSessionProps {
 const inputClass = "w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
 
 export default function StepSession({ config, onChange, touched }: StepSessionProps) {
+  const [showPersonas, setShowPersonas] = useState(false)
+
+  useEffect(() => {
+    if ((config.agent_personas || []).some((persona) => persona.trim().length > 0)) {
+      setShowPersonas(true)
+    }
+  }, [config.agent_personas])
+
   const updateAgentName = (index: number, value: string) => {
     const names = [...config.agent_names]
     names[index] = value
@@ -126,28 +135,39 @@ export default function StepSession({ config, onChange, touched }: StepSessionPr
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-admin-text mb-2">
-                Agent personas
-              </label>
-              <p className="text-xs text-admin-faint mb-3">
-                Define distinct personalities for each agent. The Director will ensure agents stay consistent with their persona throughout the conversation.
-              </p>
-              <div className="space-y-3">
-                {config.agent_names.map((name, i) => (
-                  <div key={i} className="flex flex-col">
-                    <label className="text-xs font-medium text-admin-muted mb-1">
-                      {name || `Agent ${i + 1}`}
-                    </label>
-                    <textarea
-                      value={(config.agent_personas || [])[i] || ""}
-                      onChange={(e) => updateAgentPersona(i, e.target.value)}
-                      placeholder={`Describe ${name || `Agent ${i + 1}`}'s personality, background, communication style...`}
-                      rows={2}
-                      className={`${inputClass} resize-vertical text-xs`}
-                    />
-                  </div>
-                ))}
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <label className="block text-sm font-medium text-admin-text">
+                  Agent personas (optional)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowPersonas((prev) => !prev)}
+                  className="text-xs font-medium border border-admin-border rounded-lg px-2.5 py-1 bg-admin-surface text-admin-muted hover:text-admin-text"
+                >
+                  {showPersonas ? "Hide" : "Add"}
+                </button>
               </div>
+              <p className="text-xs text-admin-faint mb-3">
+                Optional. Enable this section only if you want to define custom personalities for each agent.
+              </p>
+              {showPersonas && (
+                <div className="space-y-3">
+                  {config.agent_names.map((name, i) => (
+                    <div key={i} className="flex flex-col">
+                      <label className="text-xs font-medium text-admin-muted mb-1">
+                        {name || `Agent ${i + 1}`}
+                      </label>
+                      <textarea
+                        value={(config.agent_personas || [])[i] || ""}
+                        onChange={(e) => updateAgentPersona(i, e.target.value)}
+                        placeholder={`Describe ${name || `Agent ${i + 1}`}'s personality, background, communication style...`}
+                        rows={2}
+                        className={`${inputClass} resize-vertical text-xs`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </>
         )}

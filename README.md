@@ -40,21 +40,20 @@ docker compose up
 
 The backend will be available at `http://localhost:8000` and the frontend at `http://localhost:3000`.
 
-### One-click launchers (Linux / macOS / Windows)
+### Arranque directo desde el escritorio
 
-These launchers are intended for double-click/run usage:
-- check if Docker + Docker Compose are available
-- try to install missing dependencies
-- create `.env` from `.env.example` if missing
-- run `docker compose up -d --build`
-- open the admin and participant URLs in your browser
-- print the initial admin passphrase
+Si quieres iniciar la plataforma con doble clic desde el escritorio, usa los launchers incluidos:
 
-[![Linux](https://img.shields.io/badge/Launcher-Linux-2ea44f?logo=linux&logoColor=white)](scripts/start-linux.sh)
-[![macOS](https://img.shields.io/badge/Launcher-macOS-1f2328?logo=apple&logoColor=white)](scripts/start-macos.command)
-[![Windows](https://img.shields.io/badge/Launcher-Windows-0078d4?logo=windows&logoColor=white)](scripts/start-windows.bat)
+- **Linux:** `scripts/start-linux.sh`
+- **macOS:** `scripts/start-macos.command`
+- **Windows:** `scripts/start-windows.bat`
 
-Default first admin passphrase in the template is `changeme` (`.env.example`).
+Pasos mínimos:
+1. Ejecuta una vez el launcher de tu sistema.
+2. Se creará `.env` si no existe y se levantará Docker automáticamente.
+3. Crea un acceso directo en el escritorio al launcher y úsalo para futuros arranques.
+
+> Requisito: Docker + Docker Compose instalados.
 
 ### Production deployment
 

@@ -187,32 +187,48 @@ export default function StepSession({ config, onChange, touched }: StepSessionPr
               onChange={(e) => onChange({ messages_per_minute: Math.max(0, parseInt(e.target.value) || 0) })}
               className={inputClass}
             />
+            <p className="text-xs text-admin-muted mt-1">
+              Upper bound — actual rate will be slower, limited by the Director→Performer→Moderator pipeline latency.
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-admin-text mb-1">
-              Context window size
+              Validity check interval
             </label>
             <input
               type="number"
               min={1}
-              value={config.context_window_size}
-              onChange={(e) => onChange({ context_window_size: Math.max(1, parseInt(e.target.value) || 1) })}
+              value={config.evaluate_interval}
+              onChange={(e) => onChange({ evaluate_interval: Math.max(1, parseInt(e.target.value) || 1) })}
               className={inputClass}
             />
-            <p className="text-xs text-admin-faint mt-1">Recent messages included in LLM prompts</p>
+            <p className="text-xs text-admin-faint mt-1">How often the Director re-evaluates validity criteria (in messages). Also sets the chat log length for the Evaluate call.</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-admin-text mb-1">
-              Max concurrent agent turns
+              Action window size
             </label>
             <input
               type="number"
               min={1}
-              value={config.max_concurrent_turns}
-              onChange={(e) => onChange({ max_concurrent_turns: Math.max(1, parseInt(e.target.value) || 1) })}
+              value={config.action_window_size}
+              onChange={(e) => onChange({ action_window_size: Math.max(1, parseInt(e.target.value) || 1) })}
               className={inputClass}
             />
-            <p className="text-xs text-admin-faint mt-1">Maximum agents composing messages simultaneously. Higher values create busier, more overlapping conversations</p>
+            <p className="text-xs text-admin-faint mt-1">Recent messages included in the Director Action call. Controls how much conversation context the Director sees when deciding the next action.</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-admin-text mb-1">
+              Performer memory size
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={config.performer_memory_size}
+              onChange={(e) => onChange({ performer_memory_size: Math.max(0, parseInt(e.target.value) || 0) })}
+              className={inputClass}
+            />
+            <p className="text-xs text-admin-faint mt-1">Number of the performer's own recent messages included in its prompt. Helps avoid repetition. Set to 0 to disable.</p>
           </div>
         </div>
       </div>

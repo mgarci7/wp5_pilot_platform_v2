@@ -22,7 +22,7 @@ class Message:
     liked_by: Set[str] = field(default_factory=set)
     # Whether this message has been reported by the (single) human participant
     reported: bool = False
-    # Classifier labels (agent messages only; may be None when unavailable)
+    # Classifier labels for agent messages
     is_incivil: Optional[bool] = None
     is_like_minded: Optional[bool] = None
     inferred_participant_stance: Optional[str] = None

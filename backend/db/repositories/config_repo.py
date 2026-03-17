@@ -29,7 +29,7 @@ def validate_simulation_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "messages_per_minute", "director_llm_provider", "director_llm_model",
         "performer_llm_provider", "performer_llm_model",
         "moderator_llm_provider", "moderator_llm_model",
-        "context_window_size", "llm_concurrency_limit",
+        "evaluate_interval",
     ]
     for k in required:
         if k not in out:
@@ -58,70 +58,92 @@ def validate_simulation_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         if len(set(name.strip() for name in anames)) != na:
             raise ValueError("Agent names must be unique")
 
+    agent_personas = out.get("agent_personas", [""] * na)
+    if not isinstance(agent_personas, list) or not all(isinstance(x, str) for x in agent_personas):
+        raise ValueError("'agent_personas' must be a list of strings")
+    if len(agent_personas) != na:
+        raise ValueError("length of 'agent_personas' must equal 'num_agents'")
+    out["agent_personas"] = agent_personas
+
     mpm = int(out["messages_per_minute"])
     if mpm < 0:
         raise ValueError("'messages_per_minute' must be >= 0")
     out["messages_per_minute"] = mpm
 
-    mct = int(out.get("max_concurrent_turns", 3))
-    if mct <= 0:
-        raise ValueError("'max_concurrent_turns' must be > 0")
-    out["max_concurrent_turns"] = mct
-
-    # Classifier role defaults to Moderator settings when omitted.
-    out["classifier_llm_provider"] = (
-        out.get("classifier_llm_provider") or out.get("moderator_llm_provider")
-    )
-    out["classifier_llm_model"] = (
-        out.get("classifier_llm_model") or out.get("moderator_llm_model")
-    )
+    # Remove legacy max_concurrent_agents if present (turns are now sequential).
+    out.pop("max_concurrent_agents", None)
 
     for key in ["director_llm_provider", "director_llm_model",
                  "performer_llm_provider", "performer_llm_model",
-                 "moderator_llm_provider", "moderator_llm_model",
-                 "classifier_llm_provider", "classifier_llm_model"]:
+                 "moderator_llm_provider", "moderator_llm_model"]:
         if not isinstance(out.get(key, ""), str) or not out[key].strip():
             raise ValueError(f"'{key}' must be a non-empty string")
 
-    for k in ["director_temperature", "performer_temperature", "moderator_temperature", "classifier_temperature"]:
-        default = 0.2 if k == "classifier_temperature" else 1.0
-        v = float(out.get(k, default))
+    for k in ["director_temperature", "performer_temperature", "moderator_temperature"]:
+        v = float(out.get(k, 1.0))
         if not (0.0 <= v <= 2.0):
             raise ValueError(f"'{k}' must be between 0.0 and 2.0")
         out[k] = v
 
-    for k in ["director_top_p", "performer_top_p", "moderator_top_p", "classifier_top_p"]:
+    for k in ["director_top_p", "performer_top_p", "moderator_top_p"]:
         v = float(out.get(k, 1.0))
         if not (0.0 <= v <= 1.0):
             raise ValueError(f"'{k}' must be between 0.0 and 1.0")
         out[k] = v
 
-    defaults = {
-        "director_max_tokens": 1024,
-        "performer_max_tokens": 512,
-        "moderator_max_tokens": 256,
-        "classifier_max_tokens": 256,
-    }
+    defaults = {"director_max_tokens": 1024, "performer_max_tokens": 512, "moderator_max_tokens": 256}
     for k, d in defaults.items():
         v = int(out.get(k, d))
         if v <= 0:
             raise ValueError(f"'{k}' must be > 0")
         out[k] = v
 
+    out["classifier_llm_provider"] = (
+        out.get("classifier_llm_provider") or out.get("moderator_llm_provider")
+    )
+    out["classifier_llm_model"] = (
+        out.get("classifier_llm_model") or out.get("moderator_llm_model")
+    )
+    for key in ["classifier_llm_provider", "classifier_llm_model"]:
+        if not isinstance(out.get(key, ""), str) or not out[key].strip():
+            raise ValueError(f"'{key}' must be a non-empty string")
+
+    for key in ["classifier_temperature"]:
+        value = float(out.get(key, 0.2))
+        if not (0.0 <= value <= 2.0):
+            raise ValueError(f"'{key}' must be between 0.0 and 2.0")
+        out[key] = value
+
+    for key in ["classifier_top_p"]:
+        value = float(out.get(key, 1.0))
+        if not (0.0 <= value <= 1.0):
+            raise ValueError(f"'{key}' must be between 0.0 and 1.0")
+        out[key] = value
+
+    classifier_max_tokens = int(out.get("classifier_max_tokens", 256))
+    if classifier_max_tokens <= 0:
+        raise ValueError("'classifier_max_tokens' must be > 0")
+    out["classifier_max_tokens"] = classifier_max_tokens
+
     prompt = out.get("classifier_prompt_template", DEFAULT_CLASSIFIER_PROMPT_TEMPLATE)
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("'classifier_prompt_template' must be a non-empty string")
     out["classifier_prompt_template"] = prompt
 
-    cws = int(out["context_window_size"])
+    cws = int(out["evaluate_interval"])
     if cws <= 0:
-        raise ValueError("'context_window_size' must be > 0")
-    out["context_window_size"] = cws
+        raise ValueError("'evaluate_interval' must be > 0")
+    out["evaluate_interval"] = cws
 
-    llc = int(out["llm_concurrency_limit"])
-    if llc <= 0:
-        raise ValueError("'llm_concurrency_limit' must be > 0")
-    out["llm_concurrency_limit"] = llc
+    aws = int(out.get("action_window_size", 10))
+    if aws <= 0:
+        raise ValueError("'action_window_size' must be > 0")
+    out["action_window_size"] = aws
+
+    pms = int(out.get("performer_memory_size", 3))
+    if pms < 0:
+        raise ValueError("'performer_memory_size' must be >= 0")
+    out["performer_memory_size"] = pms
 
     return out
 
@@ -134,6 +156,11 @@ def validate_experimental_config(
 
     Raises ValueError on invalid input.
     """
+    # Ecological validity criteria — required for new experiments
+    evc = cfg.get("ecological_validity_criteria", "")
+    if isinstance(evc, str) and not evc.strip():
+        raise ValueError("'ecological_validity_criteria' is required")
+
     groups = cfg.get("groups", {})
     if not groups or not isinstance(groups, dict):
         raise ValueError("At least one treatment group is required")
@@ -141,8 +168,8 @@ def validate_experimental_config(
     for name, g in groups.items():
         if not isinstance(g, dict):
             raise ValueError(f"Group '{name}' must be a dict")
-        if not g.get("treatment", "").strip():
-            raise ValueError(f"Group '{name}' is missing a treatment description")
+        if not g.get("internal_validity_criteria", "").strip():
+            raise ValueError(f"Group '{name}' is missing an internal_validity_criteria description")
         for feat in g.get("features", []):
             if feat not in available_features:
                 raise ValueError(
@@ -218,19 +245,8 @@ async def get_experiment_config(
     cfg = row["config"]
     # asyncpg returns JSONB as a string or dict depending on version
     if isinstance(cfg, str):
-        cfg = json.loads(cfg)
-    else:
-        cfg = dict(cfg) if cfg else None
-    if not cfg:
-        return None
-    sim = cfg.get("simulation")
-    if isinstance(sim, dict):
-        try:
-            cfg["simulation"] = validate_simulation_config(sim)
-        except Exception:
-            # Keep stored config unchanged if normalization fails.
-            pass
-    return cfg
+        return json.loads(cfg)
+    return dict(cfg) if cfg else None
 
 
 async def get_experiment(
@@ -250,13 +266,6 @@ async def get_experiment(
     cfg = result.get("config")
     if isinstance(cfg, str):
         result["config"] = json.loads(cfg)
-    if isinstance(result.get("config"), dict):
-        sim = result["config"].get("simulation")
-        if isinstance(sim, dict):
-            try:
-                result["config"]["simulation"] = validate_simulation_config(sim)
-            except Exception:
-                pass
     return result
 
 
@@ -284,7 +293,7 @@ async def update_experiment_config(
     starts_at: Optional[datetime] = None,
     ends_at: Optional[datetime] = None,
 ) -> None:
-    """Update an existing experiment's configuration."""
+    """Update an existing experiment configuration."""
     async with pool.acquire() as conn:
         result = await conn.execute(
             """

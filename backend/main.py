@@ -1,9 +1,9 @@
 import asyncio
+import csv
 import io
 import json
 import os
 import secrets
-import socket
 import string
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -26,7 +26,7 @@ from utils.log_viewer import generate_html_from_lines
 from utils.session_csv_exporter import export_session_messages_csv
 from db import connection as db_conn
 from cache import redis_client
-from db.repositories import message_repo, session_repo, event_repo, config_repo
+from db.repositories import message_repo, session_repo, event_repo, config_repo, token_repo
 from features import AVAILABLE_FEATURES, FEATURES_META
 
 
@@ -53,26 +53,6 @@ ADMIN_PASSPHRASE = os.environ.get("ADMIN_PASSPHRASE", "")
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "")  # comma-separated, e.g. "https://example.com"
 
 
-
-async def _retry_startup_dependency(name: str, connect_coro_factory, attempts: int = 20, delay_seconds: float = 1.0):
-    """Retry a startup dependency connection to tolerate transient DNS/network errors."""
-    last_error = None
-    for attempt in range(1, attempts + 1):
-        try:
-            return await connect_coro_factory()
-        except (socket.gaierror, OSError, ConnectionError, TimeoutError) as e:
-            last_error = e
-            print(f"{name} connection attempt {attempt}/{attempts} failed: {type(e).__name__}: {e}")
-            if attempt < attempts:
-                await asyncio.sleep(delay_seconds)
-        except Exception as e:
-            last_error = e
-            print(f"{name} connection attempt {attempt}/{attempts} failed: {type(e).__name__}: {e}")
-            if attempt < attempts:
-                await asyncio.sleep(delay_seconds)
-
-    raise RuntimeError(f"Failed to connect to {name} after {attempts} attempts: {last_error}")
-
 # ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
 
 @asynccontextmanager
@@ -84,20 +64,26 @@ async def lifespan(_app: FastAPI):  # noqa: F841 — FastAPI requires the parame
             "please set ADMIN_PASSPHRASE in your .env file."
         )
 
-    # Connect to PostgreSQL and apply schema (with retries for transient DNS issues).
-    pool = await _retry_startup_dependency(
-        "PostgreSQL",
-        lambda: db_conn.init_pool(DATABASE_URL),
-    )
+    # Connect to PostgreSQL and apply schema.
+    pool = await db_conn.init_pool(DATABASE_URL)
     print(f"DB pool ready ({DATABASE_URL})")
 
-    # Connect to Redis (with retries for transient DNS issues) and verify with PING.
-    r = await _retry_startup_dependency(
-        "Redis",
-        lambda: redis_client.init_redis(REDIS_URL),
-    )
-    await r.ping()
+    # Connect to Redis.
+    await redis_client.init_redis(REDIS_URL)
     print(f"Redis ready ({REDIS_URL})")
+
+    # Auto-activate the most recently created non-paused experiment so
+    # participants can join without the researcher re-activating after restart.
+    global _experiment_id
+    async with pool.acquire() as conn:
+        row = await conn.fetchval(
+            "SELECT experiment_id FROM experiments "
+            "WHERE paused IS NOT TRUE "
+            "ORDER BY created_at DESC LIMIT 1"
+        )
+    if row:
+        _experiment_id = row
+        print(f"Auto-activated experiment: {_experiment_id}")
 
     # Warn about missing LLM API keys (they're only needed at runtime,
     # but an early heads-up saves debugging time).
@@ -241,9 +227,7 @@ async def root():
             "POST /session/start": "Start a new session",
             "WS /ws/{session_id}": "WebSocket for chat communication",
             "GET /session/{session_id}/report": "Generate HTML session report",
-            "GET /session/{session_id}/messages-csv": "Download session messages annotation CSV",
             "GET /health": "Health check",
-            "GET /admin/session/{session_id}/messages": "List session messages for admin evaluation",
         },
     }
 
@@ -302,10 +286,15 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         await session.attach_websocket(send_to_frontend)
 
     # Background heartbeat: send a ping every 30 seconds to detect stale connections.
+    # Also closes the WebSocket when the session ends.
     async def heartbeat():
         try:
             while True:
-                await asyncio.sleep(30)
+                await asyncio.sleep(5)
+                if session and not session.running:
+                    # Session has ended — close the WebSocket cleanly.
+                    await websocket.close(code=1000, reason="session_ended")
+                    return
                 await websocket.send_json({"type": "ping"})
         except Exception:
             pass  # connection closed — the main loop handles cleanup
@@ -521,7 +510,7 @@ async def session_report(session_id: str):
 
 @app.get("/session/{session_id}/messages-csv")
 async def session_messages_csv(session_id: str):
-    """Generate and return an annotation-ready CSV for a session's messages."""
+    """Download a single-session annotation template CSV."""
     pool = _get_pool()
 
     row = await session_repo.get_session(pool, session_id)
@@ -531,29 +520,45 @@ async def session_messages_csv(session_id: str):
     raw_messages = await message_repo.get_session_messages(pool, session_id)
     messages = [
         Message(
-            sender=m["sender"],
-            content=m["content"],
-            timestamp=datetime.fromisoformat(m["timestamp"]),
-            message_id=m["message_id"],
-            reply_to=m.get("reply_to"),
-            quoted_text=m.get("quoted_text"),
-            mentions=m.get("mentions"),
-            liked_by=set(m.get("liked_by", [])),
-            reported=m.get("reported", False),
-            metadata={k: v for k, v in m.items() if k not in (
-                "sender", "content", "timestamp", "message_id", "reply_to",
-                "quoted_text", "mentions", "liked_by", "reported", "likes_count",
-            )},
+            sender=msg["sender"],
+            content=msg["content"],
+            timestamp=datetime.fromisoformat(msg["timestamp"].replace("Z", "+00:00")),
+            message_id=msg["message_id"],
+            reply_to=msg.get("reply_to"),
+            quoted_text=msg.get("quoted_text"),
+            mentions=msg.get("mentions"),
+            liked_by=set(msg.get("liked_by") or []),
+            reported=bool(msg.get("reported")),
+            metadata={
+                k: v
+                for k, v in msg.items()
+                if k
+                not in {
+                    "sender",
+                    "content",
+                    "timestamp",
+                    "message_id",
+                    "reply_to",
+                    "quoted_text",
+                    "mentions",
+                    "likes_count",
+                    "liked_by",
+                    "reported",
+                }
+            },
         )
-        for m in raw_messages
+        for msg in raw_messages
     ]
 
     csv_path = export_session_messages_csv(session_id, messages)
-    with open(csv_path, "rb") as f:
-        payload = f.read()
+    with open(csv_path, "rb") as handle:
+        csv_bytes = handle.read()
 
-    headers = {"Content-Disposition": f'attachment; filename="{session_id}.csv"'}
-    return StreamingResponse(io.BytesIO(payload), media_type="text/csv", headers=headers)
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{session_id}.csv"'},
+    )
 
 
 # ── Admin endpoints (guarded by ADMIN_PASSPHRASE env var) ────────────────────
@@ -607,10 +612,6 @@ class TestLLMRequest(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     max_tokens: int = 64
-
-
-def _bsc_startup_retry_message() -> str:
-    return "The BSC model may still be starting on MareNostrum 5. Please wait 10 minutes and try again."
 
 
 @app.post("/admin/test-llm")
@@ -673,17 +674,9 @@ async def admin_test_llm(body: TestLLMRequest, x_admin_key: str = Header(None)):
         )
     except Exception as e:
         response_text = None
-        error_msg = (
-            _bsc_startup_retry_message()
-            if provider == "bsc"
-            else str(e)
-        )
+        error_msg = str(e)
     else:
-        error_msg = None if response_text else (
-            _bsc_startup_retry_message()
-            if provider == "bsc"
-            else "No response returned (model may be unavailable)"
-        )
+        error_msg = None if response_text else "No response returned (model may be unavailable)"
     finally:
         # Clean up client resources.
         if hasattr(client, "aclose"):
@@ -800,19 +793,11 @@ async def admin_save_config(body: dict, x_admin_key: str = Header(None)):
 
 @app.put("/admin/config/{experiment_id}")
 async def admin_update_config(experiment_id: str, body: dict, x_admin_key: str = Header(None)):
-    """Update an existing experiment's configuration.
-
-    Unlike POST /admin/config, this endpoint modifies an existing experiment.
-    The experiment_id cannot be changed.
-    """
+    """Validate and update an existing experiment config."""
     _require_admin(x_admin_key)
 
-    pool = _get_pool()
-    existing = await config_repo.get_experiment(pool, experiment_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+    description = (body.get("description") or "").strip()
 
-    # Validate simulation config.
     sim = body.get("simulation")
     if not sim:
         raise HTTPException(status_code=422, detail="simulation config is required")
@@ -821,7 +806,6 @@ async def admin_update_config(experiment_id: str, body: dict, x_admin_key: str =
     except (ValueError, TypeError, KeyError) as e:
         raise HTTPException(status_code=422, detail=f"Simulation config error: {e}")
 
-    # Validate experimental config.
     exp = body.get("experimental")
     if not exp:
         raise HTTPException(status_code=422, detail="experimental config is required")
@@ -830,8 +814,6 @@ async def admin_update_config(experiment_id: str, body: dict, x_admin_key: str =
     except ValueError as e:
         raise HTTPException(status_code=422, detail=f"Experimental config error: {e}")
 
-    # Parse schedule dates.
-    description = (body.get("description") or "").strip()
     starts_at = None
     ends_at = None
     raw_starts = body.get("starts_at")
@@ -849,12 +831,16 @@ async def admin_update_config(experiment_id: str, body: dict, x_admin_key: str =
     if starts_at and ends_at and ends_at <= starts_at:
         raise HTTPException(status_code=422, detail="ends_at must be after starts_at")
 
-    # Update config in DB.
+    pool = _get_pool()
     config_blob = {"simulation": sim, "experimental": exp}
     try:
         await config_repo.update_experiment_config(
-            pool, experiment_id, config_blob, description,
-            starts_at=starts_at, ends_at=ends_at,
+            pool,
+            experiment_id,
+            config_blob,
+            description,
+            starts_at=starts_at,
+            ends_at=ends_at,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -864,60 +850,63 @@ async def admin_update_config(experiment_id: str, body: dict, x_admin_key: str =
 
 @app.post("/admin/experiment/{experiment_id}/clone")
 async def admin_clone_experiment(experiment_id: str, body: dict, x_admin_key: str = Header(None)):
-    """Clone an existing experiment under a new ID.
-
-    Copies the full config (simulation + experimental) and generates fresh tokens
-    preserving the group structure and counts from the source experiment.
-    """
+    """Clone an experiment under a new ID and generate fresh tokens."""
     _require_admin(x_admin_key)
 
-    new_id = (body.get("new_experiment_id") or "").strip()
-    if not new_id:
+    new_experiment_id = (body.get("new_experiment_id") or "").strip()
+    if not new_experiment_id:
         raise HTTPException(status_code=422, detail="new_experiment_id is required")
 
     pool = _get_pool()
-    source = await config_repo.get_experiment(pool, experiment_id)
-    if not source:
+    experiment = await config_repo.get_experiment(pool, experiment_id)
+    if not experiment:
         raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
 
+    existing = await config_repo.get_experiment(pool, new_experiment_id)
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Experiment '{new_experiment_id}' already exists")
+
     description = (body.get("description") or f"Clone of {experiment_id}").strip()
-    config_blob = source["config"]
+    cfg = experiment["config"]
 
     try:
-        await config_repo.save_experiment_config(pool, new_id, config_blob, description)
+        await config_repo.save_experiment_config(
+            pool,
+            new_experiment_id,
+            cfg,
+            description,
+            starts_at=experiment.get("starts_at"),
+            ends_at=experiment.get("ends_at"),
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    # Clone tokens: generate new unique tokens preserving group names and counts.
-    async with pool.acquire() as conn:
-        token_rows = await conn.fetch(
-            "SELECT treatment_group FROM tokens WHERE experiment_id = $1",
-            experiment_id,
-        )
-    group_counts: Dict[str, int] = {}
-    for row in token_rows:
+    existing_tokens = await token_repo.list_tokens(pool, experiment_id)
+    token_counts: Dict[str, int] = {}
+    for row in existing_tokens:
         group = row["treatment_group"]
-        group_counts[group] = group_counts.get(group, 0) + 1
+        token_counts[group] = token_counts.get(group, 0) + 1
 
-    if group_counts:
-        seen: set = set()
-        new_token_groups: Dict[str, List[str]] = {}
-        for group, count in group_counts.items():
-            tokens = []
-            for _ in range(count):
-                while True:
-                    t = _generate_token()
-                    if t not in seen:
-                        seen.add(t)
-                        tokens.append(t)
-                        break
-            new_token_groups[group] = tokens
-        await token_manager.seed_tokens(pool, new_id, new_token_groups)
+    new_token_groups: Dict[str, List[str]] = {}
+    seen_tokens: set[str] = set()
+    for group, count in token_counts.items():
+        generated: List[str] = []
+        for _ in range(count):
+            while True:
+                token = _generate_token()
+                if token not in seen_tokens:
+                    seen_tokens.add(token)
+                    generated.append(token)
+                    break
+        new_token_groups[group] = generated
+
+    if new_token_groups:
+        await token_manager.seed_tokens(pool, new_experiment_id, new_token_groups)
 
     return {
         "status": "cloned",
         "source_experiment_id": experiment_id,
-        "new_experiment_id": new_id,
+        "new_experiment_id": new_experiment_id,
     }
 
 
@@ -1193,46 +1182,12 @@ async def admin_reset_db(
     return {"status": "experiment_deleted", "experiment_id": target_id}
 
 
-@app.get("/admin/session/{session_id}/messages")
-async def admin_session_messages(
-    session_id: str,
-    experiment_id: Optional[str] = None,
-    x_admin_key: str = Header(None),
-):
-    """Return ordered session messages for admin-side evaluation UI."""
-    _require_admin(x_admin_key)
-    eid = experiment_id or get_experiment_id()
-    pool = _get_pool()
-
-    async with pool.acquire() as conn:
-        belongs = await conn.fetchval(
-            "SELECT 1 FROM sessions WHERE session_id = $1 AND experiment_id = $2",
-            session_id,
-            eid,
-        )
-    if not belongs:
-        raise HTTPException(status_code=404, detail="Session not found for experiment")
-
-    messages = await message_repo.get_session_messages(pool, session_id)
-    return {
-        "messages": [
-            {
-                "message_id": m["message_id"],
-                "sender": m["sender"],
-                "content": m["content"],
-                "timestamp": m["timestamp"],
-            }
-            for m in messages
-        ]
-    }
-
-
 @app.get("/admin/sessions")
 async def admin_list_sessions(
     experiment_id: Optional[str] = None,
     x_admin_key: str = Header(None),
 ):
-    """Return all sessions for an experiment with message and classifier stats."""
+    """Return all sessions for an experiment with message counts."""
     _require_admin(x_admin_key)
     eid = experiment_id or get_experiment_id()
     pool = _get_pool()
@@ -1246,30 +1201,12 @@ async def admin_list_sessions(
                 s.started_at,
                 s.ended_at,
                 s.end_reason,
-                COALESCE(m.msg_count, 0) AS message_count,
-                COALESCE(c.agent_msg_count, 0) AS agent_message_count,
-                COALESCE(c.incivil_count, 0) AS incivil_message_count,
-                COALESCE(c.incivil_classified_count, 0) AS incivil_classified_count,
-                COALESCE(c.like_minded_count, 0) AS like_minded_message_count,
-                COALESCE(c.like_minded_classified_count, 0) AS like_minded_classified_count
+                COALESCE(m.msg_count, 0) AS message_count
             FROM sessions s
             LEFT JOIN (
                 SELECT session_id, COUNT(*) AS msg_count
                 FROM messages GROUP BY session_id
             ) m USING (session_id)
-            LEFT JOIN (
-                SELECT
-                    m.session_id,
-                    COUNT(*) AS agent_msg_count,
-                    COUNT(*) FILTER (WHERE m.is_incivil IS TRUE) AS incivil_count,
-                    COUNT(*) FILTER (WHERE m.is_incivil IS NOT NULL) AS incivil_classified_count,
-                    COUNT(*) FILTER (WHERE m.is_like_minded IS TRUE) AS like_minded_count,
-                    COUNT(*) FILTER (WHERE m.is_like_minded IS NOT NULL) AS like_minded_classified_count
-                FROM messages m
-                JOIN sessions s2 ON s2.session_id = m.session_id
-                WHERE m.sender <> s2.user_name
-                GROUP BY m.session_id
-            ) c USING (session_id)
             WHERE s.experiment_id = $1
             ORDER BY s.started_at DESC NULLS LAST
         """, eid)
@@ -1284,17 +1221,6 @@ async def admin_list_sessions(
                 "ended_at": r["ended_at"].isoformat() if r["ended_at"] else None,
                 "end_reason": r["end_reason"],
                 "message_count": r["message_count"],
-                "agent_message_count": r["agent_message_count"],
-                "incivil_message_count": r["incivil_message_count"],
-                "incivil_classified_count": r["incivil_classified_count"],
-                "like_minded_message_count": r["like_minded_message_count"],
-                "like_minded_classified_count": r["like_minded_classified_count"],
-                "incivil_pct": round(
-                    (r["incivil_message_count"] / r["incivil_classified_count"]) * 100, 1
-                ) if r["incivil_classified_count"] > 0 else None,
-                "like_minded_pct": round(
-                    (r["like_minded_message_count"] / r["like_minded_classified_count"]) * 100, 1
-                ) if r["like_minded_classified_count"] > 0 else None,
             }
             for r in rows
         ]
@@ -1343,6 +1269,39 @@ async def admin_list_events(
     }
 
 
+@app.get("/admin/session/{session_id}/messages")
+async def admin_session_messages(
+    session_id: str,
+    experiment_id: Optional[str] = None,
+    x_admin_key: str = Header(None),
+):
+    """Return ordered messages for a session, scoped to the selected experiment."""
+    _require_admin(x_admin_key)
+    eid = experiment_id or get_experiment_id()
+    pool = _get_pool()
+
+    session_row = await session_repo.get_session(pool, session_id)
+    if not session_row or session_row["experiment_id"] != eid:
+        raise HTTPException(status_code=404, detail="Session not found for this experiment")
+
+    messages = await message_repo.get_session_messages(pool, session_id)
+    return {
+        "messages": [
+            {
+                "message_id": msg["message_id"],
+                "sender": msg["sender"],
+                "content": msg["content"],
+                "timestamp": msg["timestamp"],
+                "is_incivil": msg.get("is_incivil"),
+                "is_like_minded": msg.get("is_like_minded"),
+                "inferred_participant_stance": msg.get("inferred_participant_stance"),
+                "classification_rationale": msg.get("classification_rationale"),
+            }
+            for msg in messages
+        ]
+    }
+
+
 @app.get("/admin/tokens/stats")
 async def admin_token_stats(
     experiment_id: Optional[str] = None,
@@ -1375,6 +1334,133 @@ async def admin_token_stats(
     }
 
 
+@app.get("/admin/sessions/csv/{experiment_id}")
+async def admin_sessions_csv(experiment_id: str, x_admin_key: str = Header(None)):
+    """Download all session messages for an experiment as a flat CSV."""
+    _require_admin(x_admin_key)
+    pool = _get_pool()
+
+    experiment = await config_repo.get_experiment(pool, experiment_id)
+    if not experiment:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+
+    async with pool.acquire() as conn:
+        session_rows = await conn.fetch(
+            """
+            SELECT
+                session_id,
+                treatment_group,
+                status,
+                started_at,
+                ended_at,
+                end_reason,
+                simulation_config,
+                experimental_config
+            FROM sessions
+            WHERE experiment_id = $1
+            ORDER BY started_at DESC NULLS LAST, session_id
+            """,
+            experiment_id,
+        )
+
+    if not session_rows:
+        raise HTTPException(status_code=404, detail="No sessions found for this experiment")
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "experiment_id",
+            "experiment_description",
+            "session_id",
+            "treatment_group",
+            "session_status",
+            "started_at",
+            "ended_at",
+            "end_reason",
+            "session_duration_minutes",
+            "messages_per_minute",
+            "evaluate_interval",
+            "action_window_size",
+            "performer_memory_size",
+            "director_model",
+            "performer_model",
+            "moderator_model",
+            "chatroom_context",
+            "ecological_validity_criteria",
+            "message_id",
+            "sender",
+            "content",
+            "sent_at",
+            "reply_to",
+            "reported",
+            "is_incivil",
+            "is_like_minded",
+            "inferred_participant_stance",
+            "classification_rationale",
+        ]
+    )
+
+    for session_row in session_rows:
+        sim_cfg = session_row["simulation_config"] or {}
+        exp_cfg = session_row["experimental_config"] or {}
+        if isinstance(sim_cfg, str):
+            sim_cfg = json.loads(sim_cfg)
+        if isinstance(exp_cfg, str):
+            exp_cfg = json.loads(exp_cfg)
+        messages = await message_repo.get_session_messages(pool, str(session_row["session_id"]))
+
+        base = [
+            experiment_id,
+            experiment.get("description", ""),
+            str(session_row["session_id"]),
+            session_row["treatment_group"],
+            session_row["status"],
+            session_row["started_at"].isoformat() if session_row["started_at"] else "",
+            session_row["ended_at"].isoformat() if session_row["ended_at"] else "",
+            session_row["end_reason"] or "",
+            sim_cfg.get("session_duration_minutes", ""),
+            sim_cfg.get("messages_per_minute", ""),
+            sim_cfg.get("evaluate_interval", ""),
+            sim_cfg.get("action_window_size", ""),
+            sim_cfg.get("performer_memory_size", ""),
+            sim_cfg.get("director_llm_model", ""),
+            sim_cfg.get("performer_llm_model", ""),
+            sim_cfg.get("moderator_llm_model", ""),
+            exp_cfg.get("chatroom_context", ""),
+            exp_cfg.get("ecological_validity_criteria", ""),
+        ]
+
+        if not messages:
+            writer.writerow(base + ["", "", "", "", "", ""])
+            continue
+
+        for msg in messages:
+            writer.writerow(
+                base
+                + [
+                    msg["message_id"],
+                    msg["sender"],
+                    msg["content"],
+                    msg["timestamp"],
+                    msg.get("reply_to") or "",
+                    "1" if msg.get("reported") else "0",
+                    msg.get("is_incivil"),
+                    msg.get("is_like_minded"),
+                    msg.get("inferred_participant_stance") or "",
+                    msg.get("classification_rationale") or "",
+                ]
+            )
+
+    buf.seek(0)
+    filename = f"{experiment_id}_sessions.csv"
+    return StreamingResponse(
+        io.StringIO(buf.getvalue()),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/admin/tokens/csv/{experiment_id}")
 async def admin_tokens_csv(experiment_id: str, x_admin_key: str = Header(None)):
     """Download all tokens for an experiment as a CSV file."""
@@ -1399,98 +1485,6 @@ async def admin_tokens_csv(experiment_id: str, x_admin_key: str = Header(None)):
         ])
     buf.seek(0)
     filename = f"{experiment_id}_tokens.csv"
-    return StreamingResponse(
-        buf,
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@app.get("/admin/sessions/csv/{experiment_id}")
-async def admin_sessions_csv(experiment_id: str, x_admin_key: str = Header(None)):
-    """Download all session data for an experiment as a flat CSV.
-
-    One row per message. Includes experiment parameters, session metadata,
-    and per-message classifier labels for cross-experiment comparison.
-    """
-    _require_admin(x_admin_key)
-    pool = _get_pool()
-
-    async with pool.acquire() as conn:
-        exp_row = await conn.fetchrow(
-            "SELECT experiment_id, description, config FROM experiments WHERE experiment_id = $1",
-            experiment_id,
-        )
-    if not exp_row:
-        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
-
-    cfg = exp_row["config"]
-    if isinstance(cfg, str):
-        cfg = json.loads(cfg)
-    sim = cfg.get("simulation", {})
-
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT
-                s.session_id, s.treatment_group, s.status, s.user_name,
-                s.started_at, s.ended_at, s.end_reason,
-                m.message_id, m.sender, m.content, m.sent_at,
-                m.is_incivil, m.is_like_minded,
-                m.inferred_participant_stance, m.classification_rationale,
-                m.reply_to, m.reported
-            FROM sessions s
-            JOIN messages m ON m.session_id = s.session_id
-            WHERE s.experiment_id = $1
-            ORDER BY s.started_at, m.seq
-        """, experiment_id)
-
-    import csv
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow([
-        "experiment_id", "description",
-        "director_model", "performer_model", "moderator_model", "classifier_model",
-        "session_duration_minutes", "messages_per_minute", "context_window_size",
-        "session_id", "treatment_group", "session_status",
-        "session_started_at", "session_ended_at", "end_reason",
-        "message_id", "sender", "sender_type", "content", "sent_at",
-        "is_incivil", "is_like_minded",
-        "inferred_participant_stance", "classification_rationale",
-        "reply_to", "reported",
-    ])
-    for r in rows:
-        sender_type = "participant" if r["sender"] == r["user_name"] else "agent"
-        writer.writerow([
-            experiment_id,
-            exp_row["description"] or "",
-            f"{sim.get('director_llm_provider','')}:{sim.get('director_llm_model','')}",
-            f"{sim.get('performer_llm_provider','')}:{sim.get('performer_llm_model','')}",
-            f"{sim.get('moderator_llm_provider','')}:{sim.get('moderator_llm_model','')}",
-            f"{sim.get('classifier_llm_provider','')}:{sim.get('classifier_llm_model','')}",
-            sim.get("session_duration_minutes", ""),
-            sim.get("messages_per_minute", ""),
-            sim.get("context_window_size", ""),
-            str(r["session_id"]),
-            r["treatment_group"],
-            r["status"],
-            r["started_at"].isoformat() if r["started_at"] else "",
-            r["ended_at"].isoformat() if r["ended_at"] else "",
-            r["end_reason"] or "",
-            str(r["message_id"]),
-            r["sender"],
-            sender_type,
-            r["content"],
-            r["sent_at"].isoformat(),
-            r["is_incivil"] if r["is_incivil"] is not None else "",
-            r["is_like_minded"] if r["is_like_minded"] is not None else "",
-            r["inferred_participant_stance"] or "",
-            r["classification_rationale"] or "",
-            str(r["reply_to"]) if r["reply_to"] else "",
-            r["reported"],
-        ])
-
-    buf.seek(0)
-    filename = f"{experiment_id}_sessions.csv"
     return StreamingResponse(
         buf,
         media_type="text/csv",

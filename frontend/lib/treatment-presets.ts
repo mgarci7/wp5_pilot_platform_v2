@@ -15,6 +15,11 @@ Important design rule:
 - Avoid abrupt over-correction in turn allocation.
 - Keep the flow natural; do not force strict alternation.`
 
+export const ECOLOGICAL_VALIDITY_3X3 = `Messages should stay short, natural, and chat-like.
+The flow should feel like a real Telegram group conversation in Spanish.
+Use a mix of standalone messages, replies, @mentions, and likes.
+Keep turn-taking organic and avoid robotic alternation or obvious quota chasing.`
+
 const GROUP_TREATMENTS: Record<string, string> = {
   low_against: `Maintain about 20% uncivil messages across the conversation.
 Maintain about 20% like-minded messages and about 80% not-like-minded messages across the conversation.
@@ -271,15 +276,17 @@ Style:
 
 export function createExperimental3x3Preset(): ExperimentalConfig {
   const groups: Record<string, TreatmentGroup> = {}
-  for (const [groupName, treatment] of Object.entries(GROUP_TREATMENTS)) {
+
+  for (const [groupName, internal_validity_criteria] of Object.entries(GROUP_TREATMENTS)) {
     groups[groupName] = {
       features: [],
-      treatment,
+      internal_validity_criteria,
     }
   }
 
   return {
     chatroom_context: CHATROOM_CONTEXT_3X3,
+    ecological_validity_criteria: ECOLOGICAL_VALIDITY_3X3,
     redirect_url: "",
     groups,
   }

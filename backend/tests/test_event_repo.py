@@ -11,11 +11,6 @@ import pytest_asyncio
 from db.repositories import event_repo
 
 
-# Use valid UUID strings to match the schema (sessions.session_id is UUID).
-EVENT_SESSION_ID = "11111111-1111-1111-1111-111111111111"
-MISSING_SESSION_ID = "22222222-2222-2222-2222-222222222222"
-
-
 # ── Setup ────────────────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture(loop_scope="session")
@@ -37,18 +32,9 @@ async def seed_session(db_pool, seed_experiment):
     """Insert a session row for FK constraints."""
     async with db_pool.acquire() as conn:
         await conn.execute(
-            """
-            INSERT INTO tokens(token, treatment_group, experiment_id)
-            VALUES($1, $2, $3) ON CONFLICT DO NOTHING
-            """,
-            "token123",
-            "control",
-            "evt_test_exp",
-        )
-        await conn.execute(
             """INSERT INTO sessions(session_id, experiment_id, token, treatment_group, user_name)
                VALUES($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING""",
-            EVENT_SESSION_ID,
+            "evt_test_session",
             "evt_test_exp",
             "token123",
             "control",
@@ -56,9 +42,8 @@ async def seed_session(db_pool, seed_experiment):
         )
     yield
     async with db_pool.acquire() as conn:
-        await conn.execute("DELETE FROM events WHERE session_id = $1::uuid", EVENT_SESSION_ID)
-        await conn.execute("DELETE FROM sessions WHERE session_id = $1::uuid", EVENT_SESSION_ID)
-        await conn.execute("DELETE FROM tokens WHERE token = 'token123'")
+        await conn.execute("DELETE FROM events WHERE session_id = 'evt_test_session'")
+        await conn.execute("DELETE FROM sessions WHERE session_id = 'evt_test_session'")
 
 
 # ── insert_event ─────────────────────────────────────────────────────────────
@@ -69,13 +54,13 @@ class TestInsertEvent:
     async def test_insert_basic_event(self, db_pool, seed_session):
         await event_repo.insert_event(
             db_pool,
-            session_id=EVENT_SESSION_ID,
+            session_id="evt_test_session",
             experiment_id="evt_test_exp",
             event_type="test_event",
             data={"key": "value"},
         )
         # Verify it was inserted
-        events = await event_repo.get_session_events(db_pool, EVENT_SESSION_ID)
+        events = await event_repo.get_session_events(db_pool, "evt_test_session")
         assert any(e["event_type"] == "test_event" for e in events)
 
     @pytest.mark.asyncio(loop_scope="session")
@@ -83,12 +68,12 @@ class TestInsertEvent:
         for i in range(3):
             await event_repo.insert_event(
                 db_pool,
-                session_id=EVENT_SESSION_ID,
+                session_id="evt_test_session",
                 experiment_id="evt_test_exp",
                 event_type=f"multi_event_{i}",
                 data={"index": i},
             )
-        events = await event_repo.get_session_events(db_pool, EVENT_SESSION_ID)
+        events = await event_repo.get_session_events(db_pool, "evt_test_session")
         multi = [e for e in events if e["event_type"].startswith("multi_event_")]
         assert len(multi) >= 3
 
@@ -99,7 +84,7 @@ class TestInsertEvent:
         # This should print to stderr but not raise
         await event_repo.insert_event(
             db_pool,
-            session_id=MISSING_SESSION_ID,
+            session_id="nonexistent_session",
             experiment_id="evt_test_exp",
             event_type="bad_event",
             data={"should": "fail silently"},
@@ -117,12 +102,12 @@ class TestGetSessionEvents:
         for etype in ["alpha", "beta", "gamma"]:
             await event_repo.insert_event(
                 db_pool,
-                session_id=EVENT_SESSION_ID,
+                session_id="evt_test_session",
                 experiment_id="evt_test_exp",
                 event_type=etype,
                 data={},
             )
-        events = await event_repo.get_session_events(db_pool, EVENT_SESSION_ID)
+        events = await event_repo.get_session_events(db_pool, "evt_test_session")
         # Should be ordered by occurred_at
         timestamps = [e["occurred_at"] for e in events]
         assert timestamps == sorted(timestamps)
@@ -131,40 +116,40 @@ class TestGetSessionEvents:
     async def test_filter_by_event_type(self, db_pool, seed_session):
         await event_repo.insert_event(
             db_pool,
-            session_id=EVENT_SESSION_ID,
+            session_id="evt_test_session",
             experiment_id="evt_test_exp",
             event_type="filter_target",
             data={"found": True},
         )
         await event_repo.insert_event(
             db_pool,
-            session_id=EVENT_SESSION_ID,
+            session_id="evt_test_session",
             experiment_id="evt_test_exp",
             event_type="other_type",
             data={"found": False},
         )
 
         filtered = await event_repo.get_session_events(
-            db_pool, EVENT_SESSION_ID, event_types=["filter_target"]
+            db_pool, "evt_test_session", event_types=["filter_target"]
         )
         assert all(e["event_type"] == "filter_target" for e in filtered)
 
     @pytest.mark.asyncio(loop_scope="session")
     async def test_empty_session_returns_empty(self, db_pool, seed_session):
-        events = await event_repo.get_session_events(db_pool, MISSING_SESSION_ID)
+        events = await event_repo.get_session_events(db_pool, "nonexistent_session_id")
         assert events == []
 
     @pytest.mark.asyncio(loop_scope="session")
     async def test_event_data_is_dict(self, db_pool, seed_session):
         await event_repo.insert_event(
             db_pool,
-            session_id=EVENT_SESSION_ID,
+            session_id="evt_test_session",
             experiment_id="evt_test_exp",
             event_type="dict_check",
             data={"nested": {"key": "value"}, "list": [1, 2, 3]},
         )
         events = await event_repo.get_session_events(
-            db_pool, EVENT_SESSION_ID, event_types=["dict_check"]
+            db_pool, "evt_test_session", event_types=["dict_check"]
         )
         assert len(events) >= 1
         data = events[-1]["data"]

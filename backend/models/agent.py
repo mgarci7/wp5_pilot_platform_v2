@@ -6,13 +6,12 @@ class Agent:
     """Represents an AI agent in the simulation.
 
     In the STAGE framework, agent selection and behaviour are controlled
-    by the Director; the Agent model carries the agent's name and persona.
+    by the Director; the Agent model carries the visible name and an optional
+    persona used to keep behaviour consistent.
     """
 
     name: str
-    persona: str = ""  # Personality description for consistent behavior
+    persona: str = ""
 
     def __repr__(self) -> str:
-        if self.persona:
-            return f"Agent(name='{self.name}', persona='{self.persona[:30]}...')"
-        return f"Agent(name='{self.name}')"
+        return f"Agent(name='{self.name}', persona='{self.persona}')"

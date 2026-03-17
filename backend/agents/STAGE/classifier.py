@@ -6,7 +6,6 @@ from typing import Dict, List, Optional
 from models import Message
 
 
-# Load Classifier prompt templates at import time
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _SYSTEM_TEMPLATE = (_PROMPTS_DIR / "system" / "classifier_prompt.md").read_text(encoding="utf-8")
 _DEFAULT_USER_TEMPLATE = (_PROMPTS_DIR / "user" / "classifier_prompt.md").read_text(encoding="utf-8")
@@ -16,18 +15,16 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = _DEFAULT_USER_TEMPLATE
 
 
 def _format_participant_messages(messages: List[Message]) -> str:
-    """Format participant messages for the classifier prompt."""
     if not messages:
         return "(No participant messages yet)"
 
     lines = []
-    for m in messages:
-        lines.append(f"- [{m.timestamp.isoformat()}] {m.content}")
+    for message in messages:
+        lines.append(f"- [{message.timestamp.isoformat()}] {message.content}")
     return "\n".join(lines)
 
 
 def build_classifier_system_prompt(chatroom_context: str = "") -> str:
-    """Build the Classifier system prompt (session-static)."""
     prompt = _SYSTEM_TEMPLATE
     prompt = prompt.replace("{CHATROOM_CONTEXT}", chatroom_context)
     return prompt
@@ -40,7 +37,6 @@ def build_classifier_user_prompt(
     prompt_template: Optional[str] = None,
     chatroom_context: str = "",
 ) -> str:
-    """Build the per-turn classifier prompt with dynamic content."""
     template = (
         prompt_template
         if isinstance(prompt_template, str) and prompt_template.strip()
@@ -70,18 +66,16 @@ def _coerce_optional_bool(value) -> Optional[bool]:
 
 
 def parse_classifier_response(raw: str) -> Dict[str, Optional[object]]:
-    """Parse and validate the Classifier response as JSON."""
     if not raw:
         raise ValueError("Classifier response is empty")
 
-    # Try to extract JSON from markdown code fence first
     fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", raw, re.DOTALL)
     json_str = fence_match.group(1).strip() if fence_match else raw.strip()
 
     try:
         data = json.loads(json_str)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Classifier response is not valid JSON: {e}\nRaw: {raw[:500]}")
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Classifier response is not valid JSON: {exc}\nRaw: {raw[:500]}")
 
     if not isinstance(data, dict):
         raise ValueError("Classifier response must be a JSON object")
@@ -110,4 +104,3 @@ def parse_classifier_response(raw: str) -> Dict[str, Optional[object]]:
         "inferred_participant_stance": inferred_participant_stance,
         "classification_rationale": rationale,
     }
-

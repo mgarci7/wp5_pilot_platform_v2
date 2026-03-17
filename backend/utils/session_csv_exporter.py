@@ -19,11 +19,7 @@ CSV_COLUMNS = [
 
 
 def export_session_messages_csv(session_id: str, messages: Iterable[Message]) -> str:
-    """Export session messages to an annotation-ready CSV file.
-
-    The output path defaults to ``backend/exports/session_csv`` and can be
-    overridden with ``SESSION_CSV_EXPORT_DIR``.
-    """
+    """Export session messages to an annotation-ready CSV file."""
     export_dir = os.environ.get(
         "SESSION_CSV_EXPORT_DIR",
         str(Path(__file__).resolve().parent.parent / "exports" / "session_csv"),
@@ -32,20 +28,21 @@ def export_session_messages_csv(session_id: str, messages: Iterable[Message]) ->
     export_path.mkdir(parents=True, exist_ok=True)
 
     csv_path = export_path / f"{session_id}.csv"
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
         writer.writeheader()
         for msg in messages:
-            writer.writerow({
-                "message": msg.content,
-                "incivility": "",
-                "hate_speech": "",
-                "threats_to_dem_freedom": "",
-                "impoliteness": "",
-                "stance": "",
-                "human_like": "",
-                "other": "",
-            })
+            writer.writerow(
+                {
+                    "message": msg.content,
+                    "incivility": "",
+                    "hate_speech": "",
+                    "threats_to_dem_freedom": "",
+                    "impoliteness": "",
+                    "stance": "",
+                    "human_like": "",
+                    "other": "",
+                }
+            )
 
     return str(csv_path)
-

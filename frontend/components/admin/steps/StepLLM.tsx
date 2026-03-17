@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import type { SimulationConfig, ProviderParamsMeta, TestLLMResult } from "../../../lib/admin-types"
 import { testLlm } from "../../../lib/admin-api"
 
@@ -22,22 +22,10 @@ const ROLE_DESCRIPTIONS: Record<Role, string> = {
   director: "Decides which agent acts, selects the action type, and provides structured instructions to the Performer.",
   performer: "Generates the actual chatroom message based on the Director's instructions.",
   moderator: "Extracts clean message content from the Performer's raw output. A fast, cheap model is ideal.",
-  classifier: "Evaluates each final agent message as incivil/civil and like-minded/not like-minded against the participant's inferred stance.",
+  classifier: "Classifies each final agent message for incivility and like-mindedness with the participant's inferred stance.",
 }
 
 const inputClass = "w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
-
-function providersForRole(role: Role, llmProviders: string[], currentProvider: string): string[] {
-  if (role === "performer") {
-    return llmProviders
-  }
-
-  const filtered = llmProviders.filter((provider) => provider !== "bsc")
-  if (currentProvider === "bsc") {
-    return ["bsc", ...filtered]
-  }
-  return filtered
-}
 
 function LLMRoleConfig({
   role,
@@ -70,12 +58,23 @@ function LLMRoleConfig({
   const maxTokens = config[`${prefix}_max_tokens` as keyof SimulationConfig] as number
 
   const suggestedModels = providerModels[provider] ?? []
-  const availableProviders = providersForRole(role, llmProviders, provider)
   const isCustomModel = suggestedModels.length > 0 && !suggestedModels.includes(model)
   const [showCustomInput, setShowCustomInput] = useState(isCustomModel)
 
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TestLLMResult | null>(null)
+
+  // Clear test result whenever provider or model changes (including via "Copy Director" button)
+  const prevProviderRef = useRef(provider)
+  const prevModelRef = useRef(model)
+  useEffect(() => {
+    if (prevProviderRef.current !== provider || prevModelRef.current !== model) {
+      setTestResult(null)
+      onTestResult?.(role, false)
+    }
+    prevProviderRef.current = provider
+    prevModelRef.current = model
+  }, [provider, model, role, onTestResult])
 
   const paramsMeta = providerParams[provider]
   const hasMutex = paramsMeta?.mutual_exclusion?.includes("temperature") &&
@@ -154,11 +153,6 @@ function LLMRoleConfig({
       {expanded && (
         <div className="px-5 pb-4 border-t border-admin-border pt-3 space-y-3">
           <p className="text-xs text-admin-muted">{ROLE_DESCRIPTIONS[role]}</p>
-          {provider === "bsc" && (
-            <p className="text-xs text-admin-faint">
-              BSC Incivility is tuned for short social-media style replies and is recommended for the Performer role.
-            </p>
-          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -168,7 +162,7 @@ function LLMRoleConfig({
                 onChange={(e) => handleProviderChange(e.target.value)}
                 className={inputClass}
               >
-                {availableProviders.map((p) => (
+                {llmProviders.map((p) => (
                   <option key={p} value={p}>{p}</option>
                 ))}
               </select>
@@ -382,37 +376,6 @@ export default function StepLLM({ config, onChange, llmProviders, providerModels
         </button>
       </div>
 
-      <div className="bg-admin-surface rounded-lg border border-admin-border p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-admin-muted uppercase tracking-wider mb-3">Shared</h3>
-        <div>
-          <label className="block text-xs font-medium text-admin-muted mb-1">
-            Max concurrent LLM API calls (per stage)
-          </label>
-          <input
-            type="number"
-            min={1}
-            value={config.llm_concurrency_limit}
-            onChange={(e) => onChange({ llm_concurrency_limit: Math.max(1, parseInt(e.target.value) || 1) })}
-            className="w-24 px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
-          />
-          <p className="text-xs text-admin-faint mt-1">Limits simultaneous requests to each LLM provider (Director, Performer, Moderator, Classifier independently). Increase for faster throughput; decrease if hitting API rate limits.</p>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-admin-muted mb-1">
-            Classifier Prompt Template
-          </label>
-          <textarea
-            value={config.classifier_prompt_template || ""}
-            onChange={(e) => onChange({ classifier_prompt_template: e.target.value })}
-            rows={10}
-            className={`${inputClass} font-mono text-xs`}
-          />
-          <p className="text-xs text-admin-faint mt-1">
-            Available placeholders: <code>{"{PARTICIPANT_MESSAGES}"}</code>, <code>{"{AGENT_MESSAGE}"}</code>, <code>{"{CHATROOM_CONTEXT}"}</code>.
-          </p>
-        </div>
-      </div>
     </div>
   )
 }

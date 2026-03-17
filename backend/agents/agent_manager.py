@@ -39,6 +39,13 @@ class AgentManager:
         self.state.add_message(message)
 
         # Persist to DB (awaited — agent messages are primary research data).
+        metadata = dict(message.metadata or {})
+        metadata.update({
+            "is_incivil": message.is_incivil,
+            "is_like_minded": message.is_like_minded,
+            "inferred_participant_stance": message.inferred_participant_stance,
+            "classification_rationale": message.classification_rationale,
+        })
         try:
             pool = db_conn.get_pool()
             await message_repo.insert_message(
@@ -52,11 +59,7 @@ class AgentManager:
                 reply_to=message.reply_to,
                 quoted_text=message.quoted_text,
                 mentions=message.mentions,
-                is_incivil=message.is_incivil,
-                is_like_minded=message.is_like_minded,
-                inferred_participant_stance=message.inferred_participant_stance,
-                classification_rationale=message.classification_rationale,
-                metadata=message.metadata,
+                metadata=metadata,
             )
         except Exception as exc:
             self.logger.log_error("persist_agent_message", str(exc))

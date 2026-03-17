@@ -228,7 +228,7 @@ export default function StepSession({ config, onChange, touched }: StepSessionPr
               onChange={(e) => onChange({ performer_memory_size: Math.max(0, parseInt(e.target.value) || 0) })}
               className={inputClass}
             />
-            <p className="text-xs text-admin-faint mt-1">Number of the performer's own recent messages included in its prompt. Helps avoid repetition. Set to 0 to disable.</p>
+            <p className="text-xs text-admin-faint mt-1">Number of the performer&apos;s own recent messages included in its prompt. Helps avoid repetition. Set to 0 to disable.</p>
           </div>
         </div>
       </div>

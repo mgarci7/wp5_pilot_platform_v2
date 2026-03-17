@@ -176,6 +176,7 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
   }
 
   const removeGroup = (name: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { [name]: _, ...rest } = config.groups
     onChange({ ...config, groups: rest })
   }

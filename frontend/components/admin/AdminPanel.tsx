@@ -316,7 +316,7 @@ export default function AdminPanel() {
     setStartsAt(sched.startsAt)
     setEndsAt(sched.endsAt)
     setSessionTouched(false)
-    setLlmTestResults({ director: false, performer: false, moderator: false })
+    setLlmTestResults({ director: false, performer: false, moderator: false, classifier: false })
     setEditingExperimentId(null)
     setSaveBanner(null)
     setSaveError("")
@@ -342,7 +342,7 @@ export default function AdminPanel() {
       setEditingExperimentId(expId)
       setTokens({ groups: {} })
       setSessionTouched(false)
-      setLlmTestResults({ director: true, performer: true, moderator: true })
+      setLlmTestResults({ director: true, performer: true, moderator: true, classifier: true })
       setSaveBanner(null)
       setSaveError("")
       setStep(0)
@@ -365,7 +365,7 @@ export default function AdminPanel() {
       setEditingExperimentId(null)
       setTokens({ groups: {} })
       setSessionTouched(false)
-      setLlmTestResults({ director: true, performer: true, moderator: true })
+      setLlmTestResults({ director: true, performer: true, moderator: true, classifier: true })
       setSaveBanner(null)
       setSaveError("")
       setStep(0)
@@ -497,7 +497,6 @@ export default function AdminPanel() {
       simulation={simulation}
       experimental={experimental}
       tokens={tokens}
-      saving={saving}
       saveResult=""
       saveError={saveError}
     />,

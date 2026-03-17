@@ -7,7 +7,6 @@ interface StepReviewProps {
   simulation: SimulationConfig
   experimental: ExperimentalConfig
   tokens: TokenConfig
-  saving: boolean
   saveResult: string
   saveError: string
 }
@@ -37,7 +36,6 @@ export default function StepReview({
   simulation,
   experimental,
   tokens,
-  saving,
   saveResult,
   saveError,
 }: StepReviewProps) {

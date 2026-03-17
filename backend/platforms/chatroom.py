@@ -231,6 +231,13 @@ class SimulationSession:
         await self.logger.drain()
 
         try:
+            from utils.session_csv_exporter import export_session_messages_csv
+            csv_path = export_session_messages_csv(self.session_id, self.state.messages)
+            print(f"[Session {self.session_id}] CSV exported: {csv_path}")
+        except Exception as exc:
+            print(f"[Session {self.session_id}] CSV export failed: {exc}")
+
+        try:
             pool = db_conn.get_pool()
             await session_repo.end_session(
                 pool,

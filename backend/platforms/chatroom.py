@@ -5,7 +5,6 @@ from typing import Callable, Dict, List, Optional
 
 from models import Message, Agent, SessionState
 from utils import Logger
-from utils.session_csv_exporter import export_session_messages_csv
 from utils.llm.llm_manager import LLMManager
 from agents.agent_manager import AgentManager
 from agents.STAGE.classifier import DEFAULT_CLASSIFIER_PROMPT_TEMPLATE
@@ -21,7 +20,7 @@ class SimulationSession:
 
     Responsibilities:
     - manages platform event loop with tick-based pacing
-    - delegates all agent decisions to the Director->Performer->Moderator->Classifier pipeline
+    - delegates all agent decisions to the Director->Performer pipeline
       via the Orchestrator and AgentManager
     - persists all messages to PostgreSQL and broadcasts via Redis pub/sub
     - wiring platform-level config, lifecycle and websocket attachment
@@ -62,11 +61,12 @@ class SimulationSession:
         self.experimental_config = group_map[treatment_group]
         self.treatment_group = treatment_group
 
-        self.treatment = self.experimental_config.get("treatment", "")
-        if not self.treatment:
-            raise RuntimeError(f"treatment_group '{treatment_group}' has no 'treatment' description")
+        self.internal_validity_criteria = self.experimental_config.get("internal_validity_criteria", "")
+        if not self.internal_validity_criteria:
+            raise RuntimeError(f"treatment_group '{treatment_group}' has no 'internal_validity_criteria' description")
 
         self.chatroom_context = experimental_full.get("chatroom_context", "")
+        self.ecological_criteria = experimental_full.get("ecological_validity_criteria", "")
         self.redirect_url = experimental_full.get("redirect_url", "")
 
         # Create LLM managers for each pipeline stage
@@ -77,13 +77,13 @@ class SimulationSession:
 
         self._rng = random.Random(int(self.simulation_config["random_seed"]))
 
-        # Initialise session state with agent personas
+        # Initialise session state
         agent_names = self.simulation_config["agent_names"]
-        agent_personas = self.simulation_config.get("agent_personas", [])
-        # Pad personas list if shorter than names
-        while len(agent_personas) < len(agent_names):
-            agent_personas.append("")
-        agents = [Agent(name=name, persona=persona) for name, persona in zip(agent_names, agent_personas)]
+        agent_personas = self.simulation_config.get("agent_personas", [""] * len(agent_names))
+        agents = [
+            Agent(name=name, persona=agent_personas[i] if i < len(agent_personas) else "")
+            for i, name in enumerate(agent_names)
+        ]
 
         self.state = SessionState(
             session_id=session_id,
@@ -142,8 +142,11 @@ class SimulationSession:
             classifier_llm=self.classifier_llm,
             state=self.state,
             logger=self.logger,
-            context_window_size=int(self.simulation_config["context_window_size"]),
+            evaluate_interval=int(self.simulation_config["evaluate_interval"]),
+            action_window_size=int(self.simulation_config["action_window_size"]),
+            performer_memory_size=int(self.simulation_config["performer_memory_size"]),
             chatroom_context=self.chatroom_context,
+            ecological_criteria=self.ecological_criteria,
             classifier_prompt_template=self.simulation_config.get(
                 "classifier_prompt_template",
                 DEFAULT_CLASSIFIER_PROMPT_TEMPLATE,
@@ -228,12 +231,6 @@ class SimulationSession:
         await self.logger.drain()
 
         try:
-            csv_path = export_session_messages_csv(self.session_id, self.state.messages)
-            print(f"Session {self.session_id} CSV exported: {csv_path}")
-        except Exception as exc:
-            print(f"[Session {self.session_id}] CSV export failed: {exc}")
-
-        try:
             pool = db_conn.get_pool()
             await session_repo.end_session(
                 pool,
@@ -251,9 +248,9 @@ class SimulationSession:
     async def _clock_loop(self) -> None:
         """Main simulation loop — tick-based pacing with messages_per_minute gate.
 
-        Turns are dispatched as background tasks so the clock keeps ticking
-        while LLM calls are in flight.  A semaphore caps concurrency to
-        prevent overwhelming LLM providers.
+        Turns are executed sequentially (awaited under a lock) so that each
+        Director→Performer→Moderator cycle sees the messages produced by the
+        previous turn.
         """
         tick_interval = 1.0
         mpm = self.simulation_config["messages_per_minute"]
@@ -299,10 +296,10 @@ class SimulationSession:
             try:
                 await self._publish_typing(started=True)
                 result = await self.agent_manager.orchestrator.execute_turn(
-                    self.treatment,
+                    self.internal_validity_criteria,
                 )
 
-                if result is None:
+                if result is None or result.action_type == "wait":
                     return
 
                 # Apply realistic typing delay based on message length.
@@ -321,6 +318,17 @@ class SimulationSession:
             finally:
                 await self._publish_typing(started=False)
 
+    async def _publish_typing(self, *, started: bool) -> None:
+        """Publish a typing indicator event via Redis pub/sub."""
+        event = {
+            "event_type": "typing_start" if started else "typing_stop",
+        }
+        try:
+            r = redis_client.get_redis()
+            await redis_client.publish_event(r, self.session_id, event)
+        except Exception as exc:
+            self.logger.log_error("publish_typing", str(exc))
+
     async def _publish_session_end(self, reason: str) -> None:
         """Publish a session_end event via Redis pub/sub so the frontend can redirect."""
         event = {
@@ -334,17 +342,6 @@ class SimulationSession:
         except Exception as exc:
             self.logger.log_error("publish_session_end", str(exc))
 
-    async def _publish_typing(self, *, started: bool) -> None:
-        """Publish a typing indicator event via Redis pub/sub."""
-        event = {
-            "event_type": "typing_start" if started else "typing_stop",
-        }
-        try:
-            r = redis_client.get_redis()
-            await redis_client.publish_event(r, self.session_id, event)
-        except Exception as exc:
-            self.logger.log_error("publish_typing", str(exc))
-
     # ── User message handling ─────────────────────────────────────────────────
 
     async def handle_user_message(
@@ -355,6 +352,8 @@ class SimulationSession:
         mentions: Optional[list] = None,
     ) -> None:
         """Handle an incoming user message — persist to DB and broadcast."""
+        if not self.running:
+            return  # session has ended; silently drop
         message = Message.create(
             sender=self.state.user_name,
             content=content,

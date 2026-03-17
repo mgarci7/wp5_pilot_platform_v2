@@ -22,7 +22,7 @@ HTML_HEAD = """\
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Session Report – {session_id}</title>
+<title>STAGElab – Session Report – {session_id}</title>
 <style>
   :root {{
     --bg: #f5f6fa;
@@ -71,7 +71,7 @@ HTML_HEAD = """\
   }}
   .config-grid {{
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, 1fr);
     gap: 1rem;
     margin-top: 1rem;
   }}
@@ -388,42 +388,134 @@ def _try_parse_director_json(text: str) -> dict | None:
 
 # ── Event renderers ──────────────────────────────────────────────────────────
 
+def _config_row(label: str, value: str, *, mono: bool = True) -> str:
+    val_class = 'config-val' if mono else 'config-val" style="font-family:inherit'
+    return (
+        f'<div class="config-row"><span class="config-key">{_esc(label)}</span>'
+        f'<span class="{val_class}">{_esc(value)}</span></div>'
+    )
+
+
+def _llm_row(role: str, sim: dict) -> str:
+    prefix = role.lower()
+    provider = sim.get(f"{prefix}_llm_provider", "?")
+    model = sim.get(f"{prefix}_llm_model", "?")
+    temp = sim.get(f"{prefix}_temperature", "")
+    top_p = sim.get(f"{prefix}_top_p", "")
+    max_tok = sim.get(f"{prefix}_max_tokens", "")
+    params = []
+    if temp != "":
+        params.append(f"temp={temp}")
+    if top_p != "":
+        params.append(f"top_p={top_p}")
+    if max_tok != "":
+        params.append(f"max={max_tok}")
+    param_str = f' ({", ".join(params)})' if params else ""
+    return (
+        f'<div class="config-row">'
+        f'<span class="config-key">{_esc(role)}</span>'
+        f'<span class="config-val">{_esc(provider)} / {_esc(model)}{_esc(param_str)}</span>'
+        f'</div>'
+    )
+
+
+# Keys handled explicitly in structured sections — skip when rendering leftovers.
+_SIM_STRUCTURED_KEYS = {
+    "session_duration_minutes", "num_agents", "agent_names",
+    "messages_per_minute", "evaluate_interval", "random_seed",
+    "director_llm_provider", "director_llm_model", "director_temperature",
+    "director_top_p", "director_max_tokens",
+    "performer_llm_provider", "performer_llm_model", "performer_temperature",
+    "performer_top_p", "performer_max_tokens",
+    "moderator_llm_provider", "moderator_llm_model", "moderator_temperature",
+    "moderator_top_p", "moderator_max_tokens",
+}
+
+_EXP_STRUCTURED_KEYS = {"internal_validity_criteria", "features", "seed"}
+
+
 def render_session_start(ev: dict) -> str:
     data = ev["data"]
     ts = _format_time(ev["timestamp"])
     sid = _esc(ev["session_id"])
-    treatment = _esc(data.get("treatment_group", ""))
+    treatment_group = _esc(data.get("treatment_group", ""))
+    experiment_id = _esc(data.get("experiment_id", ""))
+    chatroom_context = data.get("chatroom_context", "")
 
     exp_cfg = data.get("experimental_config", {})
     sim_cfg = data.get("simulation_config", {})
 
+    agent_names = sim_cfg.get("agent_names", [])
+    agent_names_str = ", ".join(n for n in agent_names if n) or "auto"
+    num_agents = sim_cfg.get("num_agents", len(agent_names))
+
+    treatment_text = exp_cfg.get("internal_validity_criteria", "")
+    features = exp_cfg.get("features", [])
+    seed = exp_cfg.get("seed")
+
     parts = [
-        f'<div class="session-header">',
-        f'  <h1>Session Report</h1>',
+        '<div class="session-header">',
+        '  <h1>Session Report</h1>',
         f'  <div class="subtitle">{sid}</div>',
-        f'  <div class="config-grid">',
-        f'    <div class="config-section">',
-        f'      <h3>Experiment</h3>',
-        f'      <div class="config-row"><span class="config-key">Treatment group</span>'
-        f'<span class="config-val">{treatment}</span></div>',
+        '  <div class="config-grid">',
+        # ── Experiment section ──
+        '    <div class="config-section">',
+        '      <h3>Experiment</h3>',
     ]
-    for k, v in exp_cfg.items():
-        parts.append(
-            f'      <div class="config-row"><span class="config-key">{_esc(k)}</span>'
-            f'<span class="config-val">{_esc(str(v))}</span></div>'
-        )
+    if experiment_id:
+        parts.append(_config_row("ID", experiment_id))
+    parts.append(_config_row("Treatment group", treatment_group))
+    if chatroom_context:
+        parts.append(_config_row("Chatroom context", chatroom_context, mono=False))
+
     parts.append('    </div>')
+
+    # ── Session section ──
     parts.append('    <div class="config-section">')
-    parts.append('      <h3>Simulation</h3>')
-    for k, v in sim_cfg.items():
-        display_v = ", ".join(v) if isinstance(v, list) else str(v)
-        parts.append(
-            f'      <div class="config-row"><span class="config-key">{_esc(k)}</span>'
-            f'<span class="config-val">{_esc(display_v)}</span></div>'
-        )
+    parts.append('      <h3>Session</h3>')
+    dur = sim_cfg.get("session_duration_minutes", "")
+    parts.append(_config_row("Duration", f"{dur} min" if dur else "?"))
+    parts.append(_config_row("Agents", f"{num_agents} ({agent_names_str})"))
+    parts.append(_config_row("Messages/min", str(sim_cfg.get("messages_per_minute", "?"))))
+    parts.append(_config_row("Evaluate interval", str(sim_cfg.get("evaluate_interval", "?"))))
+    parts.append(_config_row("Random seed", str(sim_cfg.get("random_seed", "?"))))
     parts.append('    </div>')
-    parts.append('  </div>')
-    parts.append('</div>')
+
+    # ── LLM Pipeline section ──
+    parts.append('    <div class="config-section">')
+    parts.append('      <h3>LLM Pipeline</h3>')
+    parts.append(_llm_row("Director", sim_cfg))
+    parts.append(_llm_row("Performer", sim_cfg))
+    parts.append(_llm_row("Moderator", sim_cfg))
+    parts.append('    </div>')
+
+    # ── Internal Validity section ──
+    parts.append('    <div class="config-section">')
+    parts.append('      <h3>Internal Validity Criteria</h3>')
+    if treatment_text:
+        parts.append(_config_row("Criteria", treatment_text, mono=False))
+    if features:
+        parts.append(_config_row("Features", ", ".join(features)))
+    if seed and isinstance(seed, dict):
+        parts.append(_config_row("Seed article", seed.get("headline", str(seed)), mono=False))
+    parts.append('    </div>')
+
+    # ── Any remaining keys not covered above ──
+    extra_sim = {k: v for k, v in sim_cfg.items() if k not in _SIM_STRUCTURED_KEYS}
+    extra_exp = {k: v for k, v in exp_cfg.items() if k not in _EXP_STRUCTURED_KEYS}
+    if extra_sim or extra_exp:
+        parts.append('    <div class="config-section">')
+        parts.append('      <h3>Other</h3>')
+        for k, v in extra_sim.items():
+            display_v = ", ".join(v) if isinstance(v, list) else str(v)
+            parts.append(_config_row(k, display_v))
+        for k, v in extra_exp.items():
+            display_v = ", ".join(v) if isinstance(v, list) else str(v)
+            parts.append(_config_row(k, display_v))
+        parts.append('    </div>')
+
+    parts.append('  </div>')  # close config-grid
+    parts.append('</div>')    # close session-header
     parts.append('')
     parts.append(f'<div class="subtitle">Timeline — started at {ts}</div>')
     parts.append('<div class="timeline">')
@@ -488,10 +580,18 @@ def render_llm_call(ev: dict) -> str:
     response = data.get("response", "")
     error = data.get("error")
 
-    is_director = agent == "__director__"
+    is_director = agent.startswith("__director")
     is_moderator = agent == "__moderator__"
     if is_director:
-        role_label = "Director"
+        # Distinguish the three Director sub-calls
+        if agent == "__director_update__":
+            role_label = "Director \u2192 Update"
+        elif agent == "__director_evaluate__":
+            role_label = "Director \u2192 Evaluate"
+        elif agent == "__director_action__":
+            role_label = "Director \u2192 Action"
+        else:
+            role_label = "Director"
         role_class = "director"
     elif is_moderator:
         role_label = "Moderator"
@@ -506,7 +606,12 @@ def render_llm_call(ev: dict) -> str:
     if is_director:
         parsed = _try_parse_director_json(response)
         if parsed:
-            parsed_html = _render_director_parsed(parsed)
+            if agent == "__director_update__":
+                parsed_html = _render_director_update_parsed(parsed)
+            elif agent == "__director_evaluate__":
+                parsed_html = _render_director_evaluate_parsed(parsed)
+            else:
+                parsed_html = _render_director_parsed(parsed)
 
     error_html = ""
     if error:
@@ -538,21 +643,90 @@ def render_llm_call(ev: dict) -> str:
 </div>"""
 
 
+def _render_director_update_parsed(parsed: dict) -> str:
+    """Render the Director Update step's JSON fields."""
+    parts = ['<div class="director-parsed">']
+    if "performer_profile_update" in parsed:
+        parts.append(
+            f'<div class="director-field">'
+            f'<div class="director-field-label">Performer Profile Update</div>'
+            f'{_esc(parsed["performer_profile_update"])}'
+            f'</div>'
+        )
+    # Show any extra keys not explicitly handled
+    for key, val in parsed.items():
+        if key == "performer_profile_update":
+            continue
+        parts.append(
+            f'<div class="director-field">'
+            f'<div class="director-field-label">{_esc(key)}</div>'
+            f'{_esc(str(val))}'
+            f'</div>'
+        )
+    parts.append('</div>')
+    return "\n".join(parts)
+
+
+def _render_director_evaluate_parsed(parsed: dict) -> str:
+    """Render the Director Evaluate step's JSON fields."""
+    parts = ['<div class="director-parsed">']
+    if "internal_validity_evaluation" in parsed:
+        parts.append(
+            f'<div class="director-field">'
+            f'<div class="director-field-label">Internal Validity Evaluation</div>'
+            f'{_esc(parsed["internal_validity_evaluation"])}'
+            f'</div>'
+        )
+    if "ecological_validity_evaluation" in parsed:
+        parts.append(
+            f'<div class="director-field">'
+            f'<div class="director-field-label">Ecological Validity Evaluation</div>'
+            f'{_esc(parsed["ecological_validity_evaluation"])}'
+            f'</div>'
+        )
+    # Show any extra keys not explicitly handled
+    for key, val in parsed.items():
+        if key in ("internal_validity_evaluation", "ecological_validity_evaluation"):
+            continue
+        parts.append(
+            f'<div class="director-field">'
+            f'<div class="director-field-label">{_esc(key)}</div>'
+            f'{_esc(str(val))}'
+            f'</div>'
+        )
+    parts.append('</div>')
+    return "\n".join(parts)
+
+
 def _render_director_parsed(parsed: dict) -> str:
     parts = ['<div class="director-parsed">']
 
-    if "reasoning" in parsed:
+    if "priority" in parsed:
         parts.append(
             f'<div class="director-field">'
-            f'<div class="director-field-label">Reasoning</div>'
-            f'{_esc(parsed["reasoning"])}'
+            f'<div class="director-field-label">Priority</div>'
+            f'{_esc(parsed["priority"])}'
+            f'</div>'
+        )
+    if "performer_rationale" in parsed:
+        parts.append(
+            f'<div class="director-field">'
+            f'<div class="director-field-label">Performer Rationale</div>'
+            f'{_esc(parsed["performer_rationale"])}'
+            f'</div>'
+        )
+    if "action_rationale" in parsed:
+        parts.append(
+            f'<div class="director-field">'
+            f'<div class="director-field-label">Action Rationale</div>'
+            f'{_esc(parsed["action_rationale"])}'
             f'</div>'
         )
 
     # Decision chips
     chips = []
-    if "next_agent" in parsed:
-        chips.append(f'Agent: {_esc(parsed["next_agent"])}')
+    if "next_performer" in parsed:
+        chips.append(f'Performer: {_esc(parsed["next_performer"])}')
     if "action_type" in parsed:
         chips.append(f'Action: {_esc(parsed["action_type"])}')
     if parsed.get("target_user"):
@@ -568,7 +742,7 @@ def _render_director_parsed(parsed: dict) -> str:
     # Performer instruction
     pi = parsed.get("performer_instruction")
     if pi:
-        for field in ("objective", "motivation", "strategy"):
+        for field in ("objective", "motivation", "directive"):
             if field in pi:
                 parts.append(
                     f'<div class="director-field">'

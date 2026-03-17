@@ -5,9 +5,8 @@ export interface SimulationConfig {
   session_duration_minutes: number
   num_agents: number
   agent_names: string[]
-  agent_personas: string[]  // Personality descriptions for each agent
+  agent_personas?: string[]
   messages_per_minute: number
-  max_concurrent_turns: number
   director_llm_provider: string
   director_llm_model: string
   director_temperature: number
@@ -28,9 +27,10 @@ export interface SimulationConfig {
   classifier_temperature: number
   classifier_top_p: number
   classifier_max_tokens: number
-  classifier_prompt_template: string
-  context_window_size: number
-  llm_concurrency_limit: number
+  classifier_prompt_template?: string
+  evaluate_interval: number
+  action_window_size: number
+  performer_memory_size: number
 }
 
 export interface SeedArticle {
@@ -42,12 +42,13 @@ export interface SeedArticle {
 
 export interface TreatmentGroup {
   features: string[]
-  treatment: string
+  internal_validity_criteria: string
   seed?: SeedArticle
 }
 
 export interface ExperimentalConfig {
   chatroom_context: string
+  ecological_validity_criteria: string
   redirect_url: string
   groups: Record<string, TreatmentGroup>
 }
@@ -97,13 +98,6 @@ export interface SessionSummary {
   ended_at: string | null
   end_reason: string | null
   message_count: number
-  agent_message_count: number
-  incivil_message_count: number
-  incivil_classified_count: number
-  like_minded_message_count: number
-  like_minded_classified_count: number
-  incivil_pct: number | null
-  like_minded_pct: number | null
 }
 
 export interface TokenGroupStats {

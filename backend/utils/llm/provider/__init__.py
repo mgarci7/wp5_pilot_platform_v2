@@ -27,9 +27,6 @@ PROVIDER_REGISTRY: dict[str, list[str]] = {
     "konstanz": [
         "BSC-LT/ALIA-40b-instruct-2601",
     ],
-    "bsc": [
-        "incivility",
-    ],
 }
 
 # Declares which sampling parameters each provider actually honours.
@@ -57,11 +54,6 @@ PROVIDER_PARAMS: dict[str, dict] = {
         "max_tokens": True,
     },
     "konstanz": {
-        "temperature": True,
-        "top_p": True,
-        "max_tokens": True,
-    },
-    "bsc": {
         "temperature": True,
         "top_p": True,
         "max_tokens": True,

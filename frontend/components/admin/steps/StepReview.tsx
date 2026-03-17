@@ -66,12 +66,6 @@ export default function StepReview({
         </div>
       )}
 
-      {saving && (
-        <div className="bg-admin-pastel-blue border border-admin-border rounded-lg px-4 py-3">
-          <p className="text-sm text-admin-text">Saving configuration...</p>
-        </div>
-      )}
-
       <Section title="Experiment">
         <KV label="Experiment ID" value={experimentId || "(not set)"} />
         <KV label="Starts at" value={startsAt ? new Date(startsAt).toLocaleString() : "(not set)"} />
@@ -83,14 +77,15 @@ export default function StepReview({
         <KV label="Duration" value={`${simulation.session_duration_minutes} min`} />
         <KV label="Agents" value={`${simulation.num_agents} (${simulation.agent_names.join(", ")})`} />
         <KV label="Messages/min" value={simulation.messages_per_minute} />
-        <KV label="Context window" value={simulation.context_window_size} />
-        <KV label="Max concurrent turns" value={simulation.max_concurrent_turns} />
+        <KV label="Evaluate interval" value={simulation.evaluate_interval} />
+        <KV label="Action window" value={simulation.action_window_size} />
+        <KV label="Performer memory" value={simulation.performer_memory_size} />
         <KV label="Random seed" value={simulation.random_seed} />
       </Section>
 
       <Section title="LLM Pipeline">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-          {(["director", "performer", "moderator", "classifier"] as const).map((role) => {
+        <div className="grid grid-cols-3 gap-4 text-xs">
+          {(["director", "performer", "moderator"] as const).map((role) => {
             const provider = simulation[`${role}_llm_provider` as keyof SimulationConfig] as string
             const model = simulation[`${role}_llm_model` as keyof SimulationConfig] as string
             const temp = simulation[`${role}_temperature` as keyof SimulationConfig] as number
@@ -106,21 +101,17 @@ export default function StepReview({
             )
           })}
         </div>
-        <KV label="Concurrency limit" value={simulation.llm_concurrency_limit} />
-        <KV
-          label="Classifier prompt"
-          value={`${(simulation.classifier_prompt_template || "").slice(0, 60)}${(simulation.classifier_prompt_template || "").length > 60 ? "..." : ""}`}
-        />
       </Section>
 
       <Section title="Treatment Groups">
         <KV label="Chatroom context" value={experimental.chatroom_context.slice(0, 80) + (experimental.chatroom_context.length > 80 ? "..." : "")} />
+        <KV label="Ecological validity" value={experimental.ecological_validity_criteria.slice(0, 80) + (experimental.ecological_validity_criteria.length > 80 ? "..." : "")} />
         <div className="space-y-3 mt-2">
           {Object.entries(experimental.groups).map(([name, group]) => (
             <div key={name} className="border border-admin-border rounded-lg p-3">
               <p className="text-sm font-mono font-semibold text-admin-text">{name}</p>
               <p className="text-xs text-admin-faint">features: {(group.features ?? []).join(", ") || "none"}</p>
-              <p className="text-xs text-admin-muted mt-1 line-clamp-2">{group.treatment}</p>
+              <p className="text-xs text-admin-muted mt-1 line-clamp-2">{group.internal_validity_criteria}</p>
               {group.seed && (
                 <p className="text-xs text-admin-faint mt-1">Seed: {group.seed.headline}</p>
               )}

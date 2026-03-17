@@ -12,7 +12,6 @@ import {
   getEvents,
   pauseExperiment,
   resumeExperiment,
-  cloneExperiment,
   downloadSessionsCSV,
 } from "../../lib/admin-api"
 import type { SessionSummary, TokenGroupStats, SimulationConfig, ExperimentalConfig } from "../../lib/admin-types"
@@ -165,7 +164,7 @@ function StatusDot({ label, online }: { label: string; online: boolean | null })
 const TAB_LABELS: { key: Tab; label: string; icon: string }[] = [
   { key: "overview", label: "Overview", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
   { key: "sessions", label: "Sessions", icon: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" },
-  { key: "evaluate", label: "Evaluate", icon: "M9 12h6m-6 4h6M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z" },
+  { key: "evaluate", label: "Evaluate", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
   { key: "logs", label: "Event Log", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" },
   { key: "settings", label: "Settings", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" },
 ]
@@ -234,17 +233,15 @@ function OverviewTab({
   experimentId,
   sessions,
   tokenStats,
-  onEdit,
-  onCloned,
-  onDuplicate,
+  onEditExperiment,
+  onDuplicateExperiment,
 }: {
   adminKey: string
   experimentId: string
   sessions: SessionSummary[]
   tokenStats: TokenGroupStats[]
-  onEdit: () => void
-  onCloned: (newId: string) => void
-  onDuplicate: () => void
+  onEditExperiment: (experimentId: string) => void
+  onDuplicateExperiment: (experimentId: string) => void
 }) {
   const [config, setConfig] = useState<{
     simulation: SimulationConfig
@@ -253,11 +250,6 @@ function OverviewTab({
   const [description, setDescription] = useState("")
   const [createdAt, setCreatedAt] = useState("")
   const [configLoading, setConfigLoading] = useState(true)
-  const [cloneOpen, setCloneOpen] = useState(false)
-  const [cloneId, setCloneId] = useState("")
-  const [cloneDesc, setCloneDesc] = useState("")
-  const [cloning, setCloning] = useState(false)
-  const [cloneError, setCloneError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -275,24 +267,6 @@ function OverviewTab({
       })
     return () => { cancelled = true }
   }, [adminKey, experimentId])
-
-  const handleClone = async () => {
-    const newId = cloneId.trim()
-    if (!newId) { setCloneError("New experiment ID is required"); return }
-    setCloning(true)
-    setCloneError(null)
-    try {
-      await cloneExperiment(adminKey, experimentId, newId, cloneDesc || undefined)
-      setCloneOpen(false)
-      setCloneId("")
-      setCloneDesc("")
-      onCloned(newId)
-    } catch (e: unknown) {
-      setCloneError(e instanceof Error ? e.message : "Clone failed")
-    } finally {
-      setCloning(false)
-    }
-  }
 
   const activeSessions = sessions.filter((s) => s.status === "active")
   const completedSessions = sessions.filter((s) => s.status === "ended" || s.status === "crashed")
@@ -324,102 +298,48 @@ function OverviewTab({
       {/* Token progress */}
       <TokenProgress stats={tokenStats} />
 
-      {/* Clone modal */}
-      {cloneOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-admin-surface border border-admin-border rounded-xl shadow-2xl p-6 w-full max-w-sm space-y-4">
-            <h3 className="text-sm font-semibold text-admin-text">Clone Experiment</h3>
-            <p className="text-xs text-admin-muted">
-              Creates a copy of <span className="font-mono font-medium">{experimentId}</span> with the same configuration and fresh tokens.
-            </p>
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-admin-muted">New Experiment ID *</label>
-              <input
-                type="text"
-                value={cloneId}
-                onChange={(e) => setCloneId(e.target.value)}
-                placeholder="e.g. experiment_v2"
-                className="w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-bg text-admin-text focus:outline-none focus:border-admin-accent"
-                autoFocus
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-admin-muted">Description (optional)</label>
-              <input
-                type="text"
-                value={cloneDesc}
-                onChange={(e) => setCloneDesc(e.target.value)}
-                placeholder={`Clone of ${experimentId}`}
-                className="w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-bg text-admin-text focus:outline-none focus:border-admin-accent"
-              />
-            </div>
-            {cloneError && <p className="text-xs text-red-500">{cloneError}</p>}
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => { setCloneOpen(false); setCloneError(null); setCloneId(""); setCloneDesc("") }}
-                className="px-4 py-2 text-xs font-medium text-admin-muted hover:text-admin-text transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleClone}
-                disabled={cloning}
-                className="px-4 py-2 text-xs font-medium bg-admin-accent text-white rounded-lg hover:bg-admin-accent-hover transition-colors disabled:opacity-50"
-              >
-                {cloning ? "Cloning…" : "Clone"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => onEditExperiment(experimentId)}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-admin-border text-admin-text hover:bg-admin-raised transition-colors"
+        >
+          Edit Experiment
+        </button>
+        <button
+          onClick={() => onDuplicateExperiment(experimentId)}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-admin-border text-admin-text hover:bg-admin-raised transition-colors"
+        >
+          Duplicate Experiment
+        </button>
+      </div>
 
       {/* Config summary */}
       <div className="bg-admin-surface rounded-lg border border-admin-border overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-admin-border">
           <h3 className="text-sm font-semibold text-admin-text">Experiment Configuration</h3>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onEdit}
-              className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors"
-            >
-              Edit Experiment
-            </button>
-            <button
-              onClick={() => setCloneOpen(true)}
-              className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors"
-            >
-              Clone Experiment
-            </button>
-            <button
-              onClick={onDuplicate}
-              className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors"
-            >
-              Duplicate Experiment
-            </button>
-            <button
-              onClick={async () => {
-                try {
-                  const res = await fetch(
-                    `${API_BASE}/admin/tokens/csv/${encodeURIComponent(experimentId)}`,
-                    { headers: { "X-Admin-Key": adminKey } },
-                  )
-                  if (!res.ok) throw new Error("Download failed")
-                  const blob = await res.blob()
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement("a")
-                  a.href = url
-                  a.download = `${experimentId}_tokens.csv`
-                  a.click()
-                  URL.revokeObjectURL(url)
-                } catch {
-                  // silently fail
-                }
-              }}
-              className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors"
-            >
-              Download tokens (.csv)
-            </button>
-          </div>
+          <button
+            onClick={async () => {
+              try {
+                const res = await fetch(
+                  `${API_BASE}/admin/tokens/csv/${encodeURIComponent(experimentId)}`,
+                  { headers: { "X-Admin-Key": adminKey } },
+                )
+                if (!res.ok) throw new Error("Download failed")
+                const blob = await res.blob()
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement("a")
+                a.href = url
+                a.download = `${experimentId}_tokens.csv`
+                a.click()
+                URL.revokeObjectURL(url)
+              } catch {
+                // silently fail
+              }
+            }}
+            className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors"
+          >
+            Download tokens (.csv)
+          </button>
         </div>
         <div className="px-5 py-4 space-y-4 text-sm">
           {configLoading ? (
@@ -445,8 +365,8 @@ function OverviewTab({
                   <ConfigRow label="Duration" value={`${config.simulation.session_duration_minutes} min`} />
                   <ConfigRow label="Agents" value={`${config.simulation.num_agents} (${config.simulation.agent_names.filter(Boolean).join(", ") || "auto"})`} />
                   <ConfigRow label="Messages/min" value={config.simulation.messages_per_minute} />
-                  <ConfigRow label="Context window" value={config.simulation.context_window_size} />
-                  <ConfigRow label="Max concurrent turns" value={config.simulation.max_concurrent_turns} />
+                  <ConfigRow label="Evaluate interval" value={config.simulation.evaluate_interval} />
+                  <ConfigRow label="Action window" value={config.simulation.action_window_size} />
                   <ConfigRow label="Random seed" value={config.simulation.random_seed} />
                 </div>
               </div>
@@ -458,12 +378,6 @@ function OverviewTab({
                   <LLMRow role="Director" provider={config.simulation.director_llm_provider} model={config.simulation.director_llm_model} temp={config.simulation.director_temperature} topP={config.simulation.director_top_p} maxTokens={config.simulation.director_max_tokens} />
                   <LLMRow role="Performer" provider={config.simulation.performer_llm_provider} model={config.simulation.performer_llm_model} temp={config.simulation.performer_temperature} topP={config.simulation.performer_top_p} maxTokens={config.simulation.performer_max_tokens} />
                   <LLMRow role="Moderator" provider={config.simulation.moderator_llm_provider} model={config.simulation.moderator_llm_model} temp={config.simulation.moderator_temperature} topP={config.simulation.moderator_top_p} maxTokens={config.simulation.moderator_max_tokens} />
-                  <LLMRow role="Classifier" provider={config.simulation.classifier_llm_provider} model={config.simulation.classifier_llm_model} temp={config.simulation.classifier_temperature} topP={config.simulation.classifier_top_p} maxTokens={config.simulation.classifier_max_tokens} />
-                  <ConfigRow label="Concurrency limit" value={config.simulation.llm_concurrency_limit} />
-                  <ConfigRow
-                    label="Classifier prompt"
-                    value={`${(config.simulation.classifier_prompt_template || "").slice(0, 80)}${(config.simulation.classifier_prompt_template || "").length > 80 ? "..." : ""}`}
-                  />
                 </div>
               </div>
 
@@ -476,7 +390,7 @@ function OverviewTab({
                     <div key={name} className="bg-admin-raised rounded-lg px-3 py-2 space-y-1 border border-admin-border">
                       <p className="font-mono text-xs font-semibold text-admin-text">{name}</p>
                       <p className="text-xs text-admin-muted">
-                        <span className="text-admin-faint">Treatment:</span> {group.treatment || "(none)"}
+                        <span className="text-admin-faint">Internal validity:</span> {group.internal_validity_criteria || "(none)"}
                       </p>
                       {group.features.length > 0 && (
                         <p className="text-xs text-admin-muted">
@@ -503,17 +417,18 @@ function OverviewTab({
 /* ── Sessions tab ────────────────────────────────────────────────────────── */
 
 function SessionsTab({
-  sessions,
   adminKey,
   experimentId,
+  sessions,
 }: {
-  sessions: SessionSummary[]
   adminKey: string
   experimentId: string
+  sessions: SessionSummary[]
 }) {
   const [statusFilter, setStatusFilter] = useState<string>("")
   const [groupFilter, setGroupFilter] = useState<string>("")
   const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState("")
 
   const groups = Array.from(new Set(sessions.map((s) => s.treatment_group))).sort()
   const statuses = Array.from(new Set(sessions.map((s) => s.status))).sort()
@@ -527,12 +442,13 @@ function SessionsTab({
   const activeSessions = filtered.filter((s) => s.status === "active")
   const completedSessions = filtered.filter((s) => s.status !== "active")
 
-  const handleExportCSV = async () => {
+  const handleExport = async () => {
     setExporting(true)
+    setExportError("")
     try {
       await downloadSessionsCSV(adminKey, experimentId)
-    } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "Export failed")
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "CSV export failed")
     } finally {
       setExporting(false)
     }
@@ -540,7 +456,7 @@ function SessionsTab({
 
   return (
     <div className="space-y-4">
-      {/* Filters + Export */}
+      {/* Filters */}
       <div className="bg-admin-surface rounded-lg border border-admin-border px-4 py-3 flex items-center gap-4 flex-wrap">
         <span className="text-xs font-medium text-admin-faint uppercase tracking-wider">Filters</span>
         <select
@@ -567,13 +483,19 @@ function SessionsTab({
           {filtered.length} of {sessions.length} session{sessions.length !== 1 ? "s" : ""}
         </span>
         <button
-          onClick={handleExportCSV}
-          disabled={exporting || sessions.length === 0}
-          className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover transition-colors disabled:opacity-40"
+          onClick={handleExport}
+          disabled={!experimentId || exporting}
+          className="px-3 py-1.5 text-xs font-medium border border-admin-border text-admin-text rounded-lg hover:bg-admin-border/30 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {exporting ? "Exporting…" : "Export CSV"}
+          {exporting ? "Exporting..." : "Export sessions CSV"}
         </button>
       </div>
+
+      {exportError && (
+        <div className="bg-admin-surface rounded-lg border border-admin-border p-3 text-xs text-red-600">
+          {exportError}
+        </div>
+      )}
 
       {sessions.length === 0 ? (
         <div className="text-center py-12">
@@ -1163,11 +1085,6 @@ function formatDuration(startedAt: string | null, endedAt: string | null): strin
   return `${mins}:${String(secs).padStart(2, "0")}`
 }
 
-function formatPercent(value: number | null): string {
-  if (value == null || Number.isNaN(value)) return "-"
-  return `${value.toFixed(1)}%`
-}
-
 function SessionTable({
   sessions,
   title,
@@ -1191,10 +1108,8 @@ function SessionTable({
               <th className="px-3 py-1.5">Token</th>
               <th className="px-3 py-1.5">Group</th>
               <th className="px-3 py-1.5 text-right">Msgs</th>
-              <th className="px-3 py-1.5 text-right">% Incivil</th>
-              <th className="px-3 py-1.5 text-right">% Like-minded</th>
               <th className="px-3 py-1.5 text-right">{showEndReason ? "End Reason" : "Duration"}</th>
-              <th className="px-3 py-1.5 text-right">Exports</th>
+              <th className="px-3 py-1.5 text-right">Report</th>
             </tr>
           </thead>
           <tbody>
@@ -1204,32 +1119,18 @@ function SessionTable({
                 <td className="px-3 py-1.5 font-mono text-admin-faint">{s.token}</td>
                 <td className="px-3 py-1.5 font-mono text-admin-faint">{s.treatment_group}</td>
                 <td className="px-3 py-1.5 text-right font-medium text-admin-text">{s.message_count}</td>
-                <td className="px-3 py-1.5 text-right text-admin-muted">{formatPercent(s.incivil_pct)}</td>
-                <td className="px-3 py-1.5 text-right text-admin-muted">{formatPercent(s.like_minded_pct)}</td>
                 <td className="px-3 py-1.5 text-right text-admin-muted">
                   {showEndReason ? (s.end_reason || "-") : formatDuration(s.started_at, s.ended_at)}
                 </td>
                 <td className="px-3 py-1.5 text-right">
-                  <div className="inline-flex items-center gap-2">
-                    <a
-                      href={`${API_BASE}/session/${s.session_id}/report`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-admin-accent hover:text-admin-accent-hover font-medium"
-                    >
-                      View
-                    </a>
-                    {s.status === "ended" || s.status === "crashed" ? (
-                      <a
-                        href={`${API_BASE}/session/${s.session_id}/messages-csv`}
-                        className="text-admin-accent hover:text-admin-accent-hover font-medium"
-                      >
-                        CSV
-                      </a>
-                    ) : (
-                      <span className="text-admin-faint">CSV</span>
-                    )}
-                  </div>
+                  <a
+                    href={`${API_BASE}/session/${s.session_id}/report`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-admin-accent hover:text-admin-accent-hover font-medium"
+                  >
+                    View
+                  </a>
                 </td>
               </tr>
             ))}
@@ -1404,20 +1305,12 @@ export default function Dashboard({ adminKey, onOpenWizard, onEditExperiment, on
                     experimentId={selectedExperimentId}
                     sessions={sessions}
                     tokenStats={tokenStats}
-                    onEdit={() => onEditExperiment(selectedExperimentId)}
-                    onCloned={(newId) => {
-                      refreshExperiments()
-                      setSelectedExperimentId(newId)
-                    }}
-                    onDuplicate={() => onDuplicateExperiment(selectedExperimentId)}
+                    onEditExperiment={onEditExperiment}
+                    onDuplicateExperiment={onDuplicateExperiment}
                   />
                 )}
                 {activeTab === "sessions" && (
-                  <SessionsTab
-                    sessions={sessions}
-                    adminKey={adminKey}
-                    experimentId={selectedExperimentId}
-                  />
+                  <SessionsTab adminKey={adminKey} experimentId={selectedExperimentId} sessions={sessions} />
                 )}
                 {activeTab === "evaluate" && (
                   <EvaluateTab

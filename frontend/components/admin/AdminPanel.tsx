@@ -28,49 +28,43 @@ export type AdminTheme = "light" | "dark"
 
 const DEFAULT_SIMULATION: SimulationConfig = {
   random_seed: 42,
-  session_duration_minutes: 10,
-  num_agents: 4,
-  agent_names: ["Carlos", "Maria", "Pedro", "Laura"],
+  session_duration_minutes: 5,
+  num_agents: 5,
+  agent_names: ["", "", "", "", ""],
   agent_personas: [],
-  messages_per_minute: 4,
-  max_concurrent_turns: 2,
+  messages_per_minute: 6,
   director_llm_provider: "anthropic",
-  director_llm_model: "claude-sonnet-4-20250514",
-  director_temperature: 0.7,
-  director_top_p: 0.9,
-  director_max_tokens: 512,
-  performer_llm_provider: "huggingface",
-  performer_llm_model: "dphn/Dolphin-Mistral-24B-Venice-Edition:featherless-ai",
+  director_llm_model: "claude-haiku-4-5",
+  director_temperature: 0.8,
+  director_top_p: 0.8,
+  director_max_tokens: 1024,
+  performer_llm_provider: "mistral",
+  performer_llm_model: "mistral-large-latest",
   performer_temperature: 0.8,
-  performer_top_p: 0.9,
+  performer_top_p: 0.8,
   performer_max_tokens: 256,
-  moderator_llm_provider: "huggingface",
-  moderator_llm_model: "meta-llama/Llama-3.1-8B-Instruct",
+  moderator_llm_provider: "anthropic",
+  moderator_llm_model: "claude-haiku-4-5",
   moderator_temperature: 0.2,
   moderator_top_p: 1.0,
   moderator_max_tokens: 256,
-  classifier_llm_provider: "huggingface",
-  classifier_llm_model: "meta-llama/Llama-3.1-8B-Instruct",
+  classifier_llm_provider: "anthropic",
+  classifier_llm_model: "claude-haiku-4-5",
   classifier_temperature: 0.2,
   classifier_top_p: 1.0,
   classifier_max_tokens: 256,
-  classifier_prompt_template: `# Classifier Task
+  evaluate_interval: 5,
+  action_window_size: 5,
+  performer_memory_size: 3,
+}
 
-Infer the participant's stance from the participant messages and classify the agent message.
-
-## Participant Messages
-{PARTICIPANT_MESSAGES}
-
-## Agent Message To Classify
-{AGENT_MESSAGE}
-
-Return ONLY a JSON object with keys:
-- is_incivil (true/false)
-- is_like_minded (true/false/null)
-- inferred_participant_stance (short text)
-- rationale (short text)`,
-  context_window_size: 15,
-  llm_concurrency_limit: 5,
+const DEFAULT_EXPERIMENTAL: ExperimentalConfig = {
+  chatroom_context: "",
+  ecological_validity_criteria: "The conversation should be dialogic: agents should react to the state of the conversation, rather than talking past each other. There should be a mix of action types: approx. 30% message, 30% likes, 20% replies, 20% @mentions. Messages must be short (1-2 sentences, under 30 words) — brief, punchy contributions like in a real group chat. Tone and style should vary, with some containing emojis or punctuation. Messages should be 'reddit-like': informal, self-aware, and sometimes include internet humour, slang, and abbreviations.",
+  redirect_url: "",
+  groups: {
+    condition_1: { features: [], internal_validity_criteria: "" },
+  },
 }
 
 const DEFAULT_TOKENS: TokenConfig = { groups: {} }
@@ -127,14 +121,14 @@ export default function AdminPanel() {
 
   // Wizard state
   const [step, setStep] = useState(0)
-  const [experimentId, setExperimentId] = useState("experimento_3x3_civility")
-  const [description, setDescription] = useState("Estudio 3x3: Incivilidad (20/50/80) x Alineamiento (20/50/80 like-minded).")
+  const [experimentId, setExperimentId] = useState("")
+  const [description, setDescription] = useState("")
   const [startsAt, setStartsAt] = useState(() => defaultSchedule().startsAt)
   const [endsAt, setEndsAt] = useState(() => defaultSchedule().endsAt)
 
   // Config state — initialized with frontend defaults for new experiments
   const [simulation, setSimulation] = useState<SimulationConfig>(DEFAULT_SIMULATION)
-  const [experimental, setExperimental] = useState<ExperimentalConfig>(() => createExperimental3x3Preset())
+  const [experimental, setExperimental] = useState<ExperimentalConfig>(DEFAULT_EXPERIMENTAL)
   const [tokens, setTokens] = useState<TokenConfig>(DEFAULT_TOKENS)
   const [meta, setMeta] = useState<AdminMeta | null>(null)
 
@@ -151,8 +145,6 @@ export default function AdminPanel() {
     moderator: false,
     classifier: false,
   })
-
-  // Edit mode state
   const [editingExperimentId, setEditingExperimentId] = useState<string | null>(null)
 
   // Save state
@@ -205,7 +197,6 @@ export default function AdminPanel() {
     setSaveError("")
     try {
       if (editingExperimentId) {
-        // Update existing experiment
         await updateConfig(adminKey, editingExperimentId, {
           simulation,
           experimental,
@@ -216,7 +207,6 @@ export default function AdminPanel() {
         setSaveBanner(`Experiment "${editingExperimentId}" updated successfully.`)
         setEditingExperimentId(null)
       } else {
-        // Create new experiment
         if (!tokens) return
         await saveConfig(adminKey, {
           simulation,
@@ -242,7 +232,6 @@ export default function AdminPanel() {
     switch (s) {
       case 0: {
         if (!experimentId.trim()) return "Experiment ID is required."
-        // Only check for duplicates if NOT editing an existing experiment
         if (!editingExperimentId && existingExperimentIds.has(experimentId.trim()))
           return "An experiment with this ID already exists. Choose a different ID."
         if (!description.trim()) return "Description is required."
@@ -261,7 +250,9 @@ export default function AdminPanel() {
               return `Agent name "${names[i]}" is duplicated.`
           }
         }
-        if (simulation.context_window_size < 1) return "Context window size must be at least 1."
+        if (simulation.evaluate_interval < 1) return "Validity check interval must be at least 1."
+        if (simulation.action_window_size < 1) return "Action window size must be at least 1."
+        if (simulation.performer_memory_size < 0) return "Performer memory size must be at least 0."
         return null
       }
       case 2: {
@@ -269,7 +260,7 @@ export default function AdminPanel() {
           const model = simulation[`${role}_llm_model` as keyof typeof simulation] as string
           if (!model.trim()) return `${role.charAt(0).toUpperCase() + role.slice(1)} model is required.`
         }
-        const untested = (["director", "performer", "moderator", "classifier"] as const).filter((r) => !llmTestResults[r])
+        const untested = (["director", "performer", "moderator"] as const).filter((r) => !llmTestResults[r])
         if (untested.length > 0) {
           const names = untested.map((r) => r.charAt(0).toUpperCase() + r.slice(1))
           return `Run a successful LLM test for: ${names.join(", ")}.`
@@ -280,9 +271,10 @@ export default function AdminPanel() {
         const entries = Object.entries(experimental.groups)
         if (entries.length === 0) return "At least one treatment group is required."
         if (!experimental.chatroom_context.trim()) return "Chatroom context is required."
+        if (!experimental.ecological_validity_criteria.trim()) return "Ecological validity criteria are required."
         for (const [name, group] of entries) {
           if (!name.trim()) return "All treatment groups must have a name."
-          if (!group.treatment.trim()) return `Treatment description for "${name}" is required.`
+          if (!group.internal_validity_criteria.trim()) return `Internal validity criteria for "${name}" is required.`
           if (group.features.includes("news_article")) {
             const seed = group.seed
             if (!seed || !seed.headline.trim() || !seed.body.trim())
@@ -296,7 +288,6 @@ export default function AdminPanel() {
         return null
       }
       case 4: {
-        // Skip token validation when editing (tokens already exist)
         if (editingExperimentId) return null
         const groupNames = Object.keys(experimental.groups)
         if (groupNames.length === 0) return "Define treatment groups first."
@@ -319,14 +310,14 @@ export default function AdminPanel() {
     setSimulation({ ...DEFAULT_SIMULATION })
     setExperimental(createExperimental3x3Preset())
     setTokens({ ...DEFAULT_TOKENS })
-    setExperimentId(`experimento_${Date.now()}`)
-    setDescription("Estudio 3x3: Incivilidad (20/50/80) x Alineamiento (20/50/80 like-minded).")
+    setExperimentId("")
+    setDescription("")
     const sched = defaultSchedule()
     setStartsAt(sched.startsAt)
     setEndsAt(sched.endsAt)
     setSessionTouched(false)
-    setLlmTestResults({ director: false, performer: false, moderator: false, classifier: false })
-    setEditingExperimentId(null) // Reset edit mode
+    setLlmTestResults({ director: false, performer: false, moderator: false })
+    setEditingExperimentId(null)
     setSaveBanner(null)
     setSaveError("")
     setStep(0)
@@ -349,42 +340,38 @@ export default function AdminPanel() {
       setStartsAt(starts_at ? starts_at.slice(0, 16) : "")
       setEndsAt(ends_at ? ends_at.slice(0, 16) : "")
       setEditingExperimentId(expId)
-      // Mark LLM tests as passed since config was previously validated
-      setLlmTestResults({ director: true, performer: true, moderator: true, classifier: true })
-      setTokens({ groups: {} }) // Keep empty, not needed for edit
+      setTokens({ groups: {} })
       setSessionTouched(false)
+      setLlmTestResults({ director: true, performer: true, moderator: true })
       setSaveBanner(null)
       setSaveError("")
       setStep(0)
       setView("wizard")
     } catch (e) {
-      console.error("Failed to load experiment for editing", e)
+      setSaveError(e instanceof Error ? e.message : "Failed to load experiment")
     }
   }, [adminKey])
 
-
-  const handleDuplicateExperiment = useCallback(async (sourceExperimentId: string) => {
+  const handleDuplicateExperiment = useCallback(async (expId: string) => {
     try {
-      const { config, description: desc, starts_at, ends_at } = await getExperimentConfig(adminKey, sourceExperimentId)
-      const copyId = `${sourceExperimentId}_copy_${Date.now()}`
-
+      const { config, description: desc, starts_at, ends_at } = await getExperimentConfig(adminKey, expId)
+      const copyId = `${expId}_copy_${Date.now()}`
       setSimulation(config.simulation)
       setExperimental(config.experimental)
       setExperimentId(copyId)
-      setDescription(desc ? `${desc} (copy)` : `Copy of ${sourceExperimentId}`)
+      setDescription(desc ? `${desc} (copy)` : `Copy of ${expId}`)
       setStartsAt(starts_at ? starts_at.slice(0, 16) : "")
       setEndsAt(ends_at ? ends_at.slice(0, 16) : "")
-      setEditingExperimentId(null) // Duplicate creates a new experiment
-      // Mark LLM tests as passed since copied config was previously validated
-      setLlmTestResults({ director: true, performer: true, moderator: true, classifier: true })
-      setTokens({ groups: {} }) // Require generating fresh tokens for the new experiment
+      setEditingExperimentId(null)
+      setTokens({ groups: {} })
       setSessionTouched(false)
+      setLlmTestResults({ director: true, performer: true, moderator: true })
       setSaveBanner(null)
       setSaveError("")
       setStep(0)
       setView("wizard")
     } catch (e) {
-      console.error("Failed to duplicate experiment", e)
+      setSaveError(e instanceof Error ? e.message : "Failed to duplicate experiment")
     }
   }, [adminKey])
 

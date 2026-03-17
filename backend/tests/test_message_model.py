@@ -58,10 +58,6 @@ class TestCreate:
         assert msg.mentions is None
         assert msg.liked_by == set()
         assert msg.reported is False
-        assert msg.is_incivil is None
-        assert msg.is_like_minded is None
-        assert msg.inferred_participant_stance is None
-        assert msg.classification_rationale is None
         assert msg.metadata == {}
 
 
@@ -72,9 +68,7 @@ class TestToDict:
         d = _make_msg().to_dict()
         for key in ["sender", "content", "timestamp", "message_id",
                      "reply_to", "quoted_text", "mentions",
-                     "likes_count", "liked_by", "reported",
-                     "is_incivil", "is_like_minded",
-                     "inferred_participant_stance", "classification_rationale"]:
+                     "likes_count", "liked_by", "reported"]:
             assert key in d
 
     def test_timestamp_is_iso_string(self):

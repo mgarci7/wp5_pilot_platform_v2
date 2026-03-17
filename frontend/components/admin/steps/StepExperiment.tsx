@@ -69,10 +69,10 @@ export default function StepExperiment({
               isDuplicate
                 ? "border-red-400 focus:border-red-400 focus:ring-red-400/30"
                 : "border-admin-border focus:border-admin-accent focus:ring-admin-accent/30"
-            } ${isEditing ? "opacity-60 cursor-not-allowed" : ""}`}
+            }`}
           />
           {isEditing ? (
-            <p className="text-xs text-admin-faint mt-1">Experiment ID cannot be changed when editing.</p>
+            <p className="text-xs text-admin-faint mt-1">Experiment ID is locked while editing an existing experiment.</p>
           ) : isDuplicate ? (
             <p className="text-xs text-red-400 mt-1">
               An experiment with this ID already exists. Choose a different ID.
@@ -94,23 +94,6 @@ export default function StepExperiment({
             placeholder="Brief description of this experiment run..."
             className="w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30 resize-vertical"
           />
-        </div>
-
-        <div>
-          <label htmlFor="redirect-url" className="block text-sm font-medium text-admin-text mb-1">
-            Completion Redirect URL <span className="text-admin-faint font-normal">(optional)</span>
-          </label>
-          <input
-            id="redirect-url"
-            type="url"
-            value={redirectUrl}
-            onChange={(e) => setRedirectUrl(e.target.value)}
-            placeholder="https://your-survey-tool.com/survey?id=..."
-            className="w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
-          />
-          <p className="text-xs text-admin-faint mt-1">
-            Participants will be redirected here after their session ends. Leave blank to show the built-in thank-you page.
-          </p>
         </div>
       </div>
 
@@ -150,6 +133,29 @@ export default function StepExperiment({
               <p className="text-xs text-red-400 mt-1">End date must be after start date.</p>
             )}
           </div>
+        </div>
+      </div>
+
+      <div className="bg-admin-surface rounded-lg border border-admin-border p-5 space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-admin-text">Session Completion</h3>
+          <p className="text-xs text-admin-muted mt-1">
+            When a session ends (time limit reached), participants are redirected to this URL.
+            If left empty, a built-in &quot;Thank you for participating&quot; page is shown instead.
+          </p>
+        </div>
+        <div>
+          <label htmlFor="redirect-url" className="block text-sm font-medium text-admin-text mb-1">
+            Redirect URL (optional)
+          </label>
+          <input
+            id="redirect-url"
+            type="url"
+            value={redirectUrl}
+            onChange={(e) => setRedirectUrl(e.target.value)}
+            placeholder="e.g. https://your-survey-tool.com/post-study-questionnaire"
+            className="w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
+          />
         </div>
       </div>
     </div>

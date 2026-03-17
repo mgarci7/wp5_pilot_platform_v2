@@ -225,6 +225,13 @@ export interface AdminEvent {
   data: Record<string, unknown>
 }
 
+export interface SessionMessageForEvaluation {
+  message_id: string
+  sender: string
+  content: string
+  timestamp: string
+}
+
 export async function getEvents(
   key: string,
   experimentId: string,
@@ -238,6 +245,17 @@ export async function getEvents(
   })
   const res = await adminFetch(`/admin/events?${params}`, key)
   if (!res.ok) throw new Error("Failed to load events")
+  return res.json()
+}
+
+export async function getSessionMessagesForEvaluation(
+  key: string,
+  sessionId: string,
+  experimentId: string,
+): Promise<{ messages: SessionMessageForEvaluation[] }> {
+  const params = new URLSearchParams({ experiment_id: experimentId })
+  const res = await adminFetch(`/admin/session/${encodeURIComponent(sessionId)}/messages?${params}`, key)
+  if (!res.ok) throw new Error("Failed to load session messages")
   return res.json()
 }
 
@@ -273,12 +291,16 @@ export async function cloneExperiment(
   return res.json()
 }
 
-export async function downloadSessionsCSV(key: string, experimentId: string): Promise<void> {
+export async function downloadSessionsCSV(
+  key: string,
+  experimentId: string,
+): Promise<void> {
   const res = await adminFetch(`/admin/sessions/csv/${encodeURIComponent(experimentId)}`, key)
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Export failed" }))
-    throw new Error(err.detail || "Export failed")
+    const err = await res.json().catch(() => ({ detail: "CSV export failed" }))
+    throw new Error(err.detail || "CSV export failed")
   }
+
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
@@ -299,28 +321,6 @@ export async function deleteExperiment(
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Delete failed" }))
     throw new Error(err.detail || "Delete failed")
-  }
-  return res.json()
-}
-
-
-export interface SessionMessageForEvaluation {
-  message_id: string
-  sender: string
-  content: string
-  timestamp: string
-}
-
-export async function getSessionMessagesForEvaluation(
-  key: string,
-  sessionId: string,
-  experimentId: string,
-): Promise<{ messages: SessionMessageForEvaluation[] }> {
-  const params = new URLSearchParams({ experiment_id: experimentId })
-  const res = await adminFetch(`/admin/session/${encodeURIComponent(sessionId)}/messages?${params.toString()}`, key)
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Failed to load session messages" }))
-    throw new Error(err.detail || "Failed to load session messages")
   }
   return res.json()
 }

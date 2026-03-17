@@ -19,11 +19,11 @@ type AnnotationRow = {
   other: string
 }
 
-function csvEscape(v: string): string {
-  if (v.includes(",") || v.includes('"') || v.includes("\n")) {
-    return `"${v.replace(/"/g, '""')}"`
+function csvEscape(value: string): string {
+  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
+    return `"${value.replace(/"/g, '""')}"`
   }
-  return v
+  return value
 }
 
 export default function EvaluateTab({
@@ -39,7 +39,7 @@ export default function EvaluateTab({
     () => sessions.filter((s) => s.status === "ended" || s.status === "crashed"),
     [sessions],
   )
-  const [selectedSessionId, setSelectedSessionId] = useState<string>("")
+  const [selectedSessionId, setSelectedSessionId] = useState("")
   const [rows, setRows] = useState<AnnotationRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -55,6 +55,7 @@ export default function EvaluateTab({
       setRows([])
       return
     }
+
     let cancelled = false
     setLoading(true)
     setError("")
@@ -63,10 +64,10 @@ export default function EvaluateTab({
       .then((res: { messages: SessionMessageForEvaluation[] }) => {
         if (cancelled) return
         setRows(
-          res.messages.map((m) => ({
-            message_id: m.message_id,
-            sender: m.sender,
-            message: m.content,
+          res.messages.map((message) => ({
+            message_id: message.message_id,
+            sender: message.sender,
+            message: message.content,
             incivility: false,
             hate_speech: false,
             threats_to_dem_freedom: false,
@@ -77,8 +78,10 @@ export default function EvaluateTab({
           })),
         )
       })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load session messages")
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load session messages")
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -90,7 +93,7 @@ export default function EvaluateTab({
   }, [adminKey, experimentId, selectedSessionId])
 
   const setRow = (messageId: string, patch: Partial<AnnotationRow>) => {
-    setRows((prev) => prev.map((r) => (r.message_id === messageId ? { ...r, ...patch } : r)))
+    setRows((prev) => prev.map((row) => (row.message_id === messageId ? { ...row, ...patch } : row)))
   }
 
   const handleDownloadCSV = () => {
@@ -104,34 +107,34 @@ export default function EvaluateTab({
       "human_like",
       "other",
     ]
-    const body = rows.map((r) => [
-      r.message,
-      r.incivility ? "1" : "0",
-      r.hate_speech ? "1" : "0",
-      r.threats_to_dem_freedom ? "1" : "0",
-      r.impoliteness ? "1" : "0",
-      r.stance,
-      r.human_like ? "1" : "0",
-      r.other,
+    const body = rows.map((row) => [
+      row.message,
+      row.incivility ? "1" : "0",
+      row.hate_speech ? "1" : "0",
+      row.threats_to_dem_freedom ? "1" : "0",
+      row.impoliteness ? "1" : "0",
+      row.stance,
+      row.human_like ? "1" : "0",
+      row.other,
     ])
-    const csv = [header, ...body].map((line) => line.map((v) => csvEscape(v)).join(",")).join("\n")
+    const csv = [header, ...body].map((line) => line.map((value) => csvEscape(value)).join(",")).join("\n")
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${selectedSessionId || "session"}_evaluation.csv`
-    a.click()
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${selectedSessionId || "session"}_evaluation.csv`
+    link.click()
     URL.revokeObjectURL(url)
   }
 
   const handleDownloadSummaryCSV = () => {
     const totals = rows.reduce(
-      (acc, r) => {
+      (acc, row) => {
         acc.total_messages += 1
-        if (r.incivility) acc.incivility_count += 1
-        if (r.hate_speech) acc.hate_speech_count += 1
-        if (r.threats_to_dem_freedom) acc.threats_to_democracy_count += 1
-        if (r.impoliteness) acc.impoliteness_count += 1
+        if (row.incivility) acc.incivility_count += 1
+        if (row.hate_speech) acc.hate_speech_count += 1
+        if (row.threats_to_dem_freedom) acc.threats_to_democracy_count += 1
+        if (row.impoliteness) acc.impoliteness_count += 1
         return acc
       },
       {
@@ -172,13 +175,13 @@ export default function EvaluateTab({
       pct(totals.threats_to_democracy_count, totals.total_messages),
     ]
 
-    const csv = [header, row].map((line) => line.map((v) => csvEscape(v)).join(",")).join("\n")
+    const csv = [header, row].map((line) => line.map((value) => csvEscape(value)).join(",")).join("\n")
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${selectedSessionId || "session"}_summary.csv`
-    a.click()
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${selectedSessionId || "session"}_summary.csv`
+    link.click()
     URL.revokeObjectURL(url)
   }
 
@@ -194,9 +197,9 @@ export default function EvaluateTab({
           {endedSessions.length === 0 ? (
             <option value="">No completed sessions</option>
           ) : (
-            endedSessions.map((s) => (
-              <option key={s.session_id} value={s.session_id}>
-                {s.session_id.slice(0, 8)}… ({s.treatment_group})
+            endedSessions.map((session) => (
+              <option key={session.session_id} value={session.session_id}>
+                {session.session_id.slice(0, 8)}... ({session.treatment_group})
               </option>
             ))
           )}
@@ -219,11 +222,17 @@ export default function EvaluateTab({
       </div>
 
       {loading ? (
-        <div className="bg-admin-surface rounded-lg border border-admin-border p-4 text-sm text-admin-faint">Loading messages...</div>
+        <div className="bg-admin-surface rounded-lg border border-admin-border p-4 text-sm text-admin-faint">
+          Loading messages...
+        </div>
       ) : error ? (
-        <div className="bg-admin-surface rounded-lg border border-admin-border p-4 text-sm text-red-600">{error}</div>
+        <div className="bg-admin-surface rounded-lg border border-admin-border p-4 text-sm text-red-600">
+          {error}
+        </div>
       ) : rows.length === 0 ? (
-        <div className="bg-admin-surface rounded-lg border border-admin-border p-4 text-sm text-admin-faint">No messages available for evaluation.</div>
+        <div className="bg-admin-surface rounded-lg border border-admin-border p-4 text-sm text-admin-faint">
+          No messages available for evaluation.
+        </div>
       ) : (
         <div className="bg-admin-surface rounded-lg border border-admin-border overflow-x-auto">
           <table className="w-full text-xs min-w-[1200px]">
@@ -241,18 +250,26 @@ export default function EvaluateTab({
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.message_id} className="border-b border-admin-border/50 align-top">
-                  <td className="px-3 py-2 font-mono text-admin-faint whitespace-nowrap">{r.sender}</td>
-                  <td className="px-3 py-2 text-admin-text max-w-[500px] whitespace-pre-wrap">{r.message}</td>
-                  <td className="px-3 py-2 text-center"><input type="checkbox" checked={r.incivility} onChange={(e) => setRow(r.message_id, { incivility: e.target.checked })} /></td>
-                  <td className="px-3 py-2 text-center"><input type="checkbox" checked={r.hate_speech} onChange={(e) => setRow(r.message_id, { hate_speech: e.target.checked })} /></td>
-                  <td className="px-3 py-2 text-center"><input type="checkbox" checked={r.threats_to_dem_freedom} onChange={(e) => setRow(r.message_id, { threats_to_dem_freedom: e.target.checked })} /></td>
-                  <td className="px-3 py-2 text-center"><input type="checkbox" checked={r.impoliteness} onChange={(e) => setRow(r.message_id, { impoliteness: e.target.checked })} /></td>
+              {rows.map((row) => (
+                <tr key={row.message_id} className="border-b border-admin-border/50 align-top">
+                  <td className="px-3 py-2 font-mono text-admin-faint whitespace-nowrap">{row.sender}</td>
+                  <td className="px-3 py-2 text-admin-text max-w-[500px] whitespace-pre-wrap">{row.message}</td>
+                  <td className="px-3 py-2 text-center">
+                    <input type="checkbox" checked={row.incivility} onChange={(e) => setRow(row.message_id, { incivility: e.target.checked })} />
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <input type="checkbox" checked={row.hate_speech} onChange={(e) => setRow(row.message_id, { hate_speech: e.target.checked })} />
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <input type="checkbox" checked={row.threats_to_dem_freedom} onChange={(e) => setRow(row.message_id, { threats_to_dem_freedom: e.target.checked })} />
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <input type="checkbox" checked={row.impoliteness} onChange={(e) => setRow(row.message_id, { impoliteness: e.target.checked })} />
+                  </td>
                   <td className="px-3 py-2">
                     <select
-                      value={r.stance}
-                      onChange={(e) => setRow(r.message_id, { stance: e.target.value as Stance })}
+                      value={row.stance}
+                      onChange={(e) => setRow(row.message_id, { stance: e.target.value as Stance })}
                       className="border border-admin-border rounded px-2 py-1 bg-admin-surface text-admin-text"
                     >
                       <option value="">-</option>
@@ -261,12 +278,14 @@ export default function EvaluateTab({
                       <option value="neutral">neutral</option>
                     </select>
                   </td>
-                  <td className="px-3 py-2 text-center"><input type="checkbox" checked={r.human_like} onChange={(e) => setRow(r.message_id, { human_like: e.target.checked })} /></td>
+                  <td className="px-3 py-2 text-center">
+                    <input type="checkbox" checked={row.human_like} onChange={(e) => setRow(row.message_id, { human_like: e.target.checked })} />
+                  </td>
                   <td className="px-3 py-2">
                     <input
                       type="text"
-                      value={r.other}
-                      onChange={(e) => setRow(r.message_id, { other: e.target.value })}
+                      value={row.other}
+                      onChange={(e) => setRow(row.message_id, { other: e.target.value })}
                       className="w-full border border-admin-border rounded px-2 py-1 bg-admin-surface text-admin-text"
                       placeholder="Notes"
                     />

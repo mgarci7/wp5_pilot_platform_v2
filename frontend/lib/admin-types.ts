@@ -35,6 +35,7 @@ export interface SimulationConfig {
 
 export interface SeedArticle {
   type: string
+  template_id?: string
   headline: string
   source: string
   body: string

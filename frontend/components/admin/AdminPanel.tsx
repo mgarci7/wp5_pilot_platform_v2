@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState, useCallback, useEffect } from "react"
 import PassphraseGate from "./PassphraseGate"
@@ -12,6 +12,7 @@ import StepTokens from "./steps/StepTokens"
 import StepReview from "./steps/StepReview"
 import { getMeta, saveConfig, updateConfig, listExperiments, getExperimentConfig } from "../../lib/admin-api"
 import { createExperimental3x3Preset } from "../../lib/treatment-presets"
+import { generateDefaultAgentNames, normalizeAgentNames } from "../../lib/agent-name-options"
 import type {
   SimulationConfig,
   ExperimentalConfig,
@@ -22,7 +23,7 @@ import type {
 type View = "dashboard" | "wizard"
 export type AdminTheme = "light" | "dark"
 
-// ── Frontend-owned defaults ─────────────────────────────────────────────────
+// â”€â”€ Frontend-owned defaults â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // These are the starting values for a new experiment wizard.
 // The backend validates; the frontend provides sensible defaults.
 
@@ -30,7 +31,7 @@ const DEFAULT_SIMULATION: SimulationConfig = {
   random_seed: 42,
   session_duration_minutes: 5,
   num_agents: 5,
-  agent_names: ["", "", "", "", ""],
+  agent_names: generateDefaultAgentNames(5),
   agent_personas: [],
   messages_per_minute: 6,
   director_llm_provider: "anthropic",
@@ -60,7 +61,8 @@ const DEFAULT_SIMULATION: SimulationConfig = {
 
 const DEFAULT_EXPERIMENTAL: ExperimentalConfig = {
   chatroom_context: "",
-  ecological_validity_criteria: "The conversation should be dialogic: agents should react to the state of the conversation, rather than talking past each other. There should be a mix of action types: approx. 30% message, 30% likes, 20% replies, 20% @mentions. Messages must be short (1-2 sentences, under 30 words) — brief, punchy contributions like in a real group chat. Tone and style should vary, with some containing emojis or punctuation. Messages should be 'reddit-like': informal, self-aware, and sometimes include internet humour, slang, and abbreviations.",
+  incivility_framework: "",
+  ecological_validity_criteria: "The conversation should be dialogic: agents should react to the state of the conversation, rather than talking past each other. There should be a mix of action types: approx. 30% message, 30% likes, 20% replies, 20% @mentions. Messages must be short (1-2 sentences, under 30 words) â€” brief, punchy contributions like in a real group chat. Tone and style should vary, with some containing emojis or punctuation. Messages should be 'reddit-like': informal, self-aware, and sometimes include internet humour, slang, and abbreviations.",
   redirect_url: "",
   groups: {
     condition_1: { features: [], internal_validity_criteria: "" },
@@ -68,6 +70,31 @@ const DEFAULT_EXPERIMENTAL: ExperimentalConfig = {
 }
 
 const DEFAULT_TOKENS: TokenConfig = { groups: {} }
+
+function normalizeSimulationConfig(config: SimulationConfig): SimulationConfig {
+  const numAgents = Math.max(0, config.num_agents ?? config.agent_names?.length ?? 0)
+  const personas = [...(config.agent_personas || [])]
+  while (personas.length < numAgents) personas.push("")
+  personas.length = numAgents
+
+  return {
+    ...config,
+    num_agents: numAgents,
+    agent_names: normalizeAgentNames(numAgents, config.agent_names || []),
+    agent_personas: personas,
+  }
+}
+
+function normalizeExperimentalConfig(config: ExperimentalConfig): ExperimentalConfig {
+  return {
+    ...config,
+    chatroom_context: config.chatroom_context ?? "",
+    incivility_framework: config.incivility_framework ?? "",
+    ecological_validity_criteria: config.ecological_validity_criteria ?? "",
+    redirect_url: config.redirect_url ?? "",
+    groups: config.groups ?? {},
+  }
+}
 
 /** Format a Date as a `datetime-local` input value (YYYY-MM-DDTHH:MM). */
 function toLocalDatetimeString(d: Date): string {
@@ -101,7 +128,7 @@ export default function AdminPanel() {
     })
   }, [])
 
-  // Auth — persist in sessionStorage so it survives refresh but clears on tab close
+  // Auth â€” persist in sessionStorage so it survives refresh but clears on tab close
   const [adminKey, setAdminKey] = useState("")
   const [authenticated, setAuthenticated] = useState(false)
   const [restoringSession, setRestoringSession] = useState(true)
@@ -126,7 +153,7 @@ export default function AdminPanel() {
   const [startsAt, setStartsAt] = useState(() => defaultSchedule().startsAt)
   const [endsAt, setEndsAt] = useState(() => defaultSchedule().endsAt)
 
-  // Config state — initialized with frontend defaults for new experiments
+  // Config state â€” initialized with frontend defaults for new experiments
   const [simulation, setSimulation] = useState<SimulationConfig>(DEFAULT_SIMULATION)
   const [experimental, setExperimental] = useState<ExperimentalConfig>(DEFAULT_EXPERIMENTAL)
   const [tokens, setTokens] = useState<TokenConfig>(DEFAULT_TOKENS)
@@ -227,7 +254,7 @@ export default function AdminPanel() {
     setSaving(false)
   }, [adminKey, simulation, experimental, tokens, experimentId, editingExperimentId, description, startsAt, endsAt])
 
-  // Per-step validation — returns error message or null if valid
+  // Per-step validation â€” returns error message or null if valid
   const validateStep = useCallback((s: number): string | null => {
     switch (s) {
       case 0: {
@@ -333,8 +360,8 @@ export default function AdminPanel() {
   const handleEditExperiment = useCallback(async (expId: string) => {
     try {
       const { config, description: desc, starts_at, ends_at } = await getExperimentConfig(adminKey, expId)
-      setSimulation(config.simulation)
-      setExperimental(config.experimental)
+      setSimulation(normalizeSimulationConfig(config.simulation))
+      setExperimental(normalizeExperimentalConfig(config.experimental))
       setExperimentId(expId)
       setDescription(desc || "")
       setStartsAt(starts_at ? starts_at.slice(0, 16) : "")
@@ -356,8 +383,8 @@ export default function AdminPanel() {
     try {
       const { config, description: desc, starts_at, ends_at } = await getExperimentConfig(adminKey, expId)
       const copyId = `${expId}_copy_${Date.now()}`
-      setSimulation(config.simulation)
-      setExperimental(config.experimental)
+      setSimulation(normalizeSimulationConfig(config.simulation))
+      setExperimental(normalizeExperimentalConfig(config.experimental))
       setExperimentId(copyId)
       setDescription(desc ? `${desc} (copy)` : `Copy of ${expId}`)
       setStartsAt(starts_at ? starts_at.slice(0, 16) : "")
@@ -519,3 +546,6 @@ export default function AdminPanel() {
     </div>
   )
 }
+
+
+

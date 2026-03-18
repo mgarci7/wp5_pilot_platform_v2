@@ -46,6 +46,7 @@ export interface SimulationConfig {
 
 export interface SeedArticle {
   type: string
+  template_id?: string
   headline: string
   source: string
   body: string
@@ -59,6 +60,7 @@ export interface TreatmentGroup {
 
 export interface ExperimentalConfig {
   chatroom_context: string
+  incivility_framework: string
   ecological_validity_criteria: string
   redirect_url: string
   groups: Record<string, TreatmentGroup>

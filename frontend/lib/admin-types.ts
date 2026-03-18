@@ -35,6 +35,7 @@ export interface SimulationConfig {
   evaluate_interval: number
   action_window_size: number
   performer_memory_size: number
+  humanize_output?: boolean
 }
 
 export interface SeedArticle {

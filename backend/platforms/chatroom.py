@@ -155,6 +155,7 @@ class SimulationSession:
             director_action_prompt_template=self.simulation_config.get("director_action_prompt_template") or None,
             director_evaluate_prompt_template=self.simulation_config.get("director_evaluate_prompt_template") or None,
             moderator_prompt_template=self.simulation_config.get("moderator_prompt_template") or None,
+            humanize_output=bool(self.simulation_config.get("humanize_output", False)),
             rng=self._rng,
         )
 

@@ -134,6 +134,7 @@ class Orchestrator:
         director_action_prompt_template: Optional[str] = None,
         director_evaluate_prompt_template: Optional[str] = None,
         moderator_prompt_template: Optional[str] = None,
+        humanize_output: bool = False,
         rng: Optional[random.Random] = None,
     ):
         self.director_llm = director_llm
@@ -172,6 +173,7 @@ class Orchestrator:
             if isinstance(moderator_prompt_template, str) and moderator_prompt_template.strip()
             else None
         )
+        self.humanize_output = humanize_output
 
         # Build the shuffled name mapping (stable for the session lifetime).
         _rng = rng or random.Random()
@@ -558,6 +560,11 @@ class Orchestrator:
                 "",
                 content,
             ).strip()
+
+        # 6c. Optional post-processing humanization (informal typos, no hashtags…)
+        if self.humanize_output:
+            from utils.humanizer import humanize as _humanize
+            content = _humanize(content)
 
         # 7. Format the output into a Message
         mentions = None

@@ -36,11 +36,11 @@ export interface SimulationConfig {
   action_window_size: number
   performer_memory_size: number
   humanize_output?: boolean
-  humanize_strip_hashtags?: boolean
-  humanize_strip_inverted_punct?: boolean
-  humanize_word_subs?: boolean
-  humanize_drop_accents?: boolean
-  humanize_comma_spacing?: boolean
+  humanize_strip_hashtags?: number
+  humanize_strip_inverted_punct?: number
+  humanize_word_subs?: number
+  humanize_drop_accents?: number
+  humanize_comma_spacing?: number
   humanize_max_emoji?: number
 }
 

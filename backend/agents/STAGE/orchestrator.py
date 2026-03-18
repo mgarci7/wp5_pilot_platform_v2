@@ -569,11 +569,11 @@ class Orchestrator:
             r = self.humanize_rules
             content = _humanize(
                 content,
-                strip_hashtags=r.get("strip_hashtags", True),
-                strip_inverted_punct=r.get("strip_inverted_punct", True),
-                word_subs=r.get("word_subs", True),
-                drop_accents=r.get("drop_accents", True),
-                comma_spacing=r.get("comma_spacing", True),
+                strip_hashtags=int(r.get("strip_hashtags", 100)),
+                strip_inverted_punct=int(r.get("strip_inverted_punct", 100)),
+                word_subs=int(r.get("word_subs", 80)),
+                drop_accents=int(r.get("drop_accents", 40)),
+                comma_spacing=int(r.get("comma_spacing", 50)),
                 max_emoji=int(r.get("max_emoji", 1)),
             )
 

@@ -39,20 +39,24 @@ def _strip_inverted_punctuation(text: str) -> str:
     return text.replace("¿", "").replace("¡", "")
 
 
-def _drop_spaces_after_comma(text: str, rng: random.Random) -> str:
+def _drop_spaces_after_comma(text: str, rng: random.Random, prob: float = 0.50) -> str:
     """Randomly remove the space after commas (informal typing)."""
     def _replace(m):
-        return ",\u200b" if rng.random() < 0.50 else m.group(0)
+        return ",\u200b" if rng.random() < prob else m.group(0)
     result = re.sub(r",\s+", _replace, text)
     return result.replace(",\u200b", ",")
 
 
-def _apply_word_subs(text: str, rng: random.Random) -> str:
-    """Apply informal word contractions probabilistically."""
+def _apply_word_subs(text: str, rng: random.Random, scale: float = 1.0) -> str:
+    """Apply informal word contractions probabilistically.
+
+    `scale` (0–1) multiplies every substitution probability; 0 disables all subs.
+    """
     for pattern, replacement, prob in _WORD_SUBS:
-        if prob == 0.0:
+        effective_prob = prob * scale
+        if effective_prob <= 0.0:
             continue
-        def _sub(m, rep=replacement, p=prob):
+        def _sub(m, rep=replacement, p=effective_prob):
             return rep if rng.random() < p else m.group(0)
         text = re.sub(pattern, _sub, text, flags=re.IGNORECASE)
     return text
@@ -94,14 +98,22 @@ def _strip_excess_emoji(text: str, rng: random.Random, max_emoji: int = 1) -> st
 def humanize(
     text: str,
     seed: Optional[int] = None,
-    strip_hashtags: bool = True,
-    strip_inverted_punct: bool = True,
-    word_subs: bool = True,
-    drop_accents: bool = True,
-    comma_spacing: bool = True,
+    strip_hashtags: int = 100,
+    strip_inverted_punct: int = 100,
+    word_subs: int = 80,
+    drop_accents: int = 40,
+    comma_spacing: int = 50,
     max_emoji: int = 1,
 ) -> str:
     """Apply informal chatroom humanization to a Spanish message.
+
+    Each rule parameter is a probability percentage (0–100):
+      - strip_hashtags: chance to remove all #hashtag tokens
+      - strip_inverted_punct: chance to remove ¿ and ¡
+      - word_subs: scales the base contraction probabilities (100 = full, 0 = off)
+      - drop_accents: chance to remove accents from the whole message
+      - comma_spacing: per-comma chance to drop the space after it
+      - max_emoji: hard cap on number of emoji kept (not a probability)
 
     All transformations are probabilistic (seeded for reproducibility if
     `seed` is provided) so each call produces slightly different output.
@@ -111,16 +123,16 @@ def humanize(
 
     rng = random.Random(seed)
 
-    if strip_hashtags:
+    if strip_hashtags > 0 and rng.random() < strip_hashtags / 100:
         text = _strip_hashtags(text)
-    if strip_inverted_punct:
+    if strip_inverted_punct > 0 and rng.random() < strip_inverted_punct / 100:
         text = _strip_inverted_punctuation(text)
-    if word_subs:
-        text = _apply_word_subs(text, rng)
-    if drop_accents:
-        text = _drop_accents(text, rng)
-    if comma_spacing:
-        text = _drop_spaces_after_comma(text, rng)
+    if word_subs > 0:
+        text = _apply_word_subs(text, rng, scale=word_subs / 100)
+    if drop_accents > 0:
+        text = _drop_accents(text, rng, prob=drop_accents / 100)
+    if comma_spacing > 0:
+        text = _drop_spaces_after_comma(text, rng, prob=comma_spacing / 100)
     if max_emoji >= 0:
         text = _strip_excess_emoji(text, rng, max_emoji=max_emoji)
 

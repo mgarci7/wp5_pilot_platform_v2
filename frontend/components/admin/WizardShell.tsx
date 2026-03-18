@@ -157,8 +157,8 @@ export default function WizardShell({
         </div>
       </div>
 
-      {/* Step content */}
-      <div className="max-w-4xl mx-auto px-6 py-6">
+      {/* Step content — pb-24 ensures content isn't hidden behind fixed nav */}
+      <div className="max-w-4xl mx-auto px-6 py-6 pb-24">
         {/* Validation error banner */}
         {stepError && (
           <div className="mb-4 rounded-lg border border-red-400/40 bg-red-500/10 px-4 py-3 flex items-start gap-2">

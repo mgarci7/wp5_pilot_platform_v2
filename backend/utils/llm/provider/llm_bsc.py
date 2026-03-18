@@ -76,11 +76,13 @@ class BSCClient:
         temperature: float = None,
         top_p: float = None,
         max_tokens: int = 1024,
+        bsc_model_version: str = None,
     ):
         self.model_name = model_name
         self.temperature = temperature
         self.top_p = top_p
         self.max_tokens = max_tokens
+        self.bsc_model_version = bsc_model_version or "v2"  # Default to V2
         self.base_url = os.getenv("BSC_API_BASE_URL", DEFAULT_BASE_URL)
         api_key = os.getenv("BSC_API_KEY", "")
 
@@ -106,6 +108,10 @@ class BSCClient:
             kwargs["temperature"] = self.temperature
         if self.top_p is not None:
             kwargs["top_p"] = self.top_p
+
+        # Pass model_version as extra body parameter for BSC API
+        kwargs["extra_body"] = {"model_version": self.bsc_model_version}
+
         return kwargs
 
     def generate_response(

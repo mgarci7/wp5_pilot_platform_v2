@@ -500,6 +500,50 @@ export default function StepLLM({ config, onChange, llmProviders, providerModels
         )}
       </div>
 
+      {/* ── BSC Model Version ─────────────────────────────────────── */}
+      <div className="bg-admin-surface rounded-lg border border-admin-border p-5">
+        <div className="mb-3">
+          <span className="text-sm font-semibold text-admin-text">BSC Model Version</span>
+          <span className="text-xs text-admin-faint ml-2">Select which fine-tuned model to use (V1 or V2)</span>
+        </div>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => onChange({ bsc_model_version: "v1" })}
+              className={`px-4 py-3 rounded-lg border transition-colors text-left ${
+                (config.bsc_model_version ?? "v2") === "v1"
+                  ? "border-admin-accent bg-admin-accent/10 text-admin-text"
+                  : "border-admin-border hover:border-admin-accent/50 text-admin-muted"
+              }`}
+            >
+              <div className="font-medium text-sm">V1 Model</div>
+              <div className="text-xs mt-1 opacity-75">
+                r=16, α=32 · English prompts · 130k samples
+              </div>
+            </button>
+
+            <button
+              onClick={() => onChange({ bsc_model_version: "v2" })}
+              className={`px-4 py-3 rounded-lg border transition-colors text-left ${
+                (config.bsc_model_version ?? "v2") === "v2"
+                  ? "border-admin-accent bg-admin-accent/10 text-admin-text"
+                  : "border-admin-border hover:border-admin-accent/50 text-admin-muted"
+              }`}
+            >
+              <div className="font-medium text-sm">V2 Model (Recommended)</div>
+              <div className="text-xs mt-1 opacity-75">
+                r=64, α=128 · Spanish prompts · 88k balanced
+              </div>
+            </button>
+          </div>
+
+          <div className="text-xs text-admin-faint bg-admin-surface-alt border border-admin-border rounded p-3">
+            <strong className="text-admin-muted">Important:</strong> Changing the model version will require stopping any running job and launching a new one with the selected version. Each job can only serve one model at a time.
+          </div>
+        </div>
+      </div>
+
     </div>
   )
 }

@@ -42,6 +42,7 @@ export interface SimulationConfig {
   humanize_drop_accents?: number
   humanize_comma_spacing?: number
   humanize_max_emoji?: number
+  bsc_model_version?: string
 }
 
 export interface SeedArticle {

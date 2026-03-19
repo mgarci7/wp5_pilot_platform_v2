@@ -670,7 +670,7 @@ async def admin_test_llm(body: TestLLMRequest, x_admin_key: str = Header(None)):
         "max_tokens": body.max_tokens,
     }
     if provider == "bsc":
-        bsc_model_version = (body.bsc_model_version or "v2").lower()
+        bsc_model_version = (body.bsc_model_version or "v1").lower()
         if bsc_model_version not in {"v1", "v2"}:
             raise HTTPException(status_code=422, detail="bsc_model_version must be 'v1' or 'v2'")
         call_params["bsc_model_version"] = bsc_model_version

@@ -36,10 +36,12 @@ Read the performer profiles and participation counts below. Which performer is b
 
 ### Step 3: Select an Action
 
-Read the recent chat log below. What action type and target would allow your chosen performer to deliver on the priority you identified?
+Read the recent chat log and current action distribution below. What action type and target would allow your chosen performer to deliver on the priority you identified?
 
 {#USER}
 {CHAT_LOG}
+
+**Action distribution so far:** {ACTION_SUMMARY}
 {/USER}
 
 Select exactly one action type:
@@ -48,6 +50,10 @@ Select exactly one action type:
 - `reply`: A quote-reply to a specific earlier message that is NOT the most recent. Use only when the performer needs to resurface something from earlier in the conversation. Requires `target_message_id`.
 - `@mention`: A message that @mentions a performer who did NOT send the most recent message. Use only when the performer needs to draw someone specific back into the conversation. Requires `target_user`.
 - `like`: A non-verbal endorsement of a message. Requires `target_message_id`.
+
+**Important:** Aim for a natural mix of approximately 30% messages, 30% likes, 20% replies, and 20% @mentions. If `likes` or `@mentions` are underrepresented in the action distribution above, prioritise those types now.
+
+**Important:** If the most recent message in the chat log is from the human participant and they @mentioned or addressed a specific agent by name, that agent MUST be the next performer and MUST reply directly to the participant's message (use `reply` with the participant's message_id, or `@mention` if appropriate).
 
 ### Step 4: Write the Performer Instruction
 

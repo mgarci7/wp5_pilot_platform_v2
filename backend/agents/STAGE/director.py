@@ -259,6 +259,7 @@ def build_action_user_prompt(
     ecological_validity_summary: str,
     chatroom_context: str = "",
     performer_counts: Optional[Dict[str, int]] = None,
+    action_counts: Optional[Dict[str, int]] = None,
     exclude_performer: Optional[str] = None,
     template: Optional[str] = None,
 ) -> str:
@@ -266,6 +267,7 @@ def build_action_user_prompt(
     chat_log = format_chat_log(messages)
     profiles_str = format_agent_profiles(agent_profiles)
     participation_summary = format_participation_summary(performer_counts, exclude_performer=exclude_performer) if performer_counts else "(No actions yet)"
+    action_summary = format_action_summary(action_counts) if action_counts else "(No actions yet)"
 
     raw = template if (isinstance(template, str) and template.strip()) else _ACTION_TEMPLATE
     prompt = _render_prompt(raw, "user")
@@ -274,6 +276,7 @@ def build_action_user_prompt(
     prompt = prompt.replace("{ECOLOGICAL_VALIDITY_SUMMARY}", ecological_validity_summary)
     prompt = prompt.replace("{AGENT_PROFILES}", profiles_str)
     prompt = prompt.replace("{PARTICIPATION_SUMMARY}", participation_summary)
+    prompt = prompt.replace("{ACTION_SUMMARY}", action_summary)
     prompt = prompt.replace("{CHAT_LOG}", chat_log)
 
     return prompt

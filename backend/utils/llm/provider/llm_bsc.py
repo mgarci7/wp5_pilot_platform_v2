@@ -146,7 +146,7 @@ class BSCClient:
         self.temperature = temperature
         self.top_p = top_p
         self.max_tokens = max_tokens
-        self.bsc_model_version = bsc_model_version or "v2"  # Default to V2
+        self.bsc_model_version = bsc_model_version or "v1"  # Default to V1 (V2 not yet available)
         self.base_urls = _resolve_base_urls()
         self.base_url = self.base_urls[0]
         self.api_key = _resolve_api_key()

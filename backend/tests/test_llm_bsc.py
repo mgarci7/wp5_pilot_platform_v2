@@ -41,7 +41,7 @@ class TestExtractMessageText:
 
 class TestBaseUrlResolution:
     def test_defaults_to_local_then_public(self):
-        with patch.dict("os.environ", {}, clear=False):
+        with patch.dict("os.environ", {"BSC_API_BASE_URL": ""}, clear=False):
             assert _resolve_base_urls() == [DEFAULT_LOCAL_BASE_URL, DEFAULT_PUBLIC_BASE_URL]
 
     def test_env_base_urls_override_defaults(self):

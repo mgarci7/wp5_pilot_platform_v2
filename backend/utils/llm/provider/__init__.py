@@ -28,7 +28,7 @@ PROVIDER_REGISTRY: dict[str, list[str]] = {
         "BSC-LT/ALIA-40b-instruct-2601",
     ],
     "bsc": [
-        "incivility",
+        "/gpfs/projects/bsc100/digital_media/Incivility-SNF/Incivility-classifier/models/incivility-v1-merged",
     ],
 }
 

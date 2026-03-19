@@ -1,6 +1,15 @@
+import json
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from utils.llm.provider.llm_bsc import _extract_message_text
+from utils.llm.provider.llm_bsc import (
+    DEFAULT_LOCAL_BASE_URL,
+    DEFAULT_PUBLIC_BASE_URL,
+    _extract_message_text,
+    _load_api_key_from_keys_file,
+    _resolve_base_urls,
+)
 
 
 def _completion(*, content=None, reasoning_content=None):
@@ -28,3 +37,26 @@ class TestExtractMessageText:
     def test_returns_none_when_no_text(self):
         completion = _completion(content="", reasoning_content="")
         assert _extract_message_text(completion) is None
+
+
+class TestBaseUrlResolution:
+    def test_defaults_to_local_then_public(self):
+        with patch.dict("os.environ", {}, clear=False):
+            assert _resolve_base_urls() == [DEFAULT_LOCAL_BASE_URL, DEFAULT_PUBLIC_BASE_URL]
+
+    def test_env_base_urls_override_defaults(self):
+        with patch.dict("os.environ", {"BSC_API_BASE_URL": "http://a.test/v1, http://b.test/v1"}, clear=False):
+            assert _resolve_base_urls() == ["http://a.test/v1", "http://b.test/v1"]
+
+
+class TestApiKeyLoading:
+    def test_loads_first_enabled_key_from_keys_file(self, tmp_path: Path):
+        keys_file = tmp_path / "api_keys.json"
+        keys_file.write_text(json.dumps({
+            "keys": {
+                "disabled-key": {"enabled": False},
+                "enabled-key": {"enabled": True},
+            }
+        }))
+
+        assert _load_api_key_from_keys_file(str(keys_file)) == "enabled-key"

@@ -20,7 +20,8 @@ No es la mejor opcion para:
 
 La plataforma usa el endpoint OpenAI-compatible:
 
-- Base URL por defecto: `http://212.128.226.126/incivility/api/v1`
+- Base URL por defecto en la VM del proyecto: `http://127.0.0.1:8888/v1`
+- Fallback remoto si no encuentra la API local: `http://212.128.226.126/incivility/api/v1`
 - Modelo sugerido: `incivility`
 
 La integracion incluye una adaptacion especifica para esta API porque devuelve el texto generado en `reasoning_content` cuando `content` viene vacio.
@@ -33,7 +34,11 @@ Anade estas variables a tu `.env`:
 BSC_API_KEY=tu_api_key
 # opcional
 BSC_API_BASE_URL=http://212.128.226.126/incivility/api/v1
+# opcional si quieres leer la key desde un fichero compartido
+BSC_API_KEYS_FILE=/etc/incivility-api/api_keys.json
 ```
+
+Si `BSC_API_KEY` no esta definida y el backend corre en la misma VM que `incivility-api`, la plataforma intentara leer automaticamente la primera key habilitada desde `/etc/incivility-api/api_keys.json`.
 
 ## Como usarlo en el admin
 

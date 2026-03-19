@@ -145,10 +145,20 @@ async def main():
     director_llm = LLMManager.from_simulation_config(SIMULATION_CONFIG, role="director")
     performer_llm = LLMManager.from_simulation_config(SIMULATION_CONFIG, role="performer")
     moderator_llm = LLMManager.from_simulation_config(SIMULATION_CONFIG, role="moderator")
+    classifier_cfg = {
+        **SIMULATION_CONFIG,
+        "classifier_llm_provider": SIMULATION_CONFIG["moderator_llm_provider"],
+        "classifier_llm_model": SIMULATION_CONFIG["moderator_llm_model"],
+        "classifier_temperature": SIMULATION_CONFIG["moderator_temperature"],
+        "classifier_top_p": SIMULATION_CONFIG["moderator_top_p"],
+        "classifier_max_tokens": SIMULATION_CONFIG["moderator_max_tokens"],
+    }
+    classifier_llm = LLMManager.from_simulation_config(classifier_cfg, role="classifier")
 
     director_llm.client = LoggingLLMClient(director_llm.client, "DIRECTOR")
     performer_llm.client = LoggingLLMClient(performer_llm.client, "PERFORMER")
     moderator_llm.client = LoggingLLMClient(moderator_llm.client, "MODERATOR")
+    classifier_llm.client = LoggingLLMClient(classifier_llm.client, "CLASSIFIER")
 
     # Build session state (starts empty)
     agents = [Agent(name=n) for n in SIMULATION_CONFIG["agent_names"]]
@@ -170,6 +180,7 @@ async def main():
         director_llm=director_llm,
         performer_llm=performer_llm,
         moderator_llm=moderator_llm,
+        classifier_llm=classifier_llm,
         state=state,
         logger=logger,
         evaluate_interval=SIMULATION_CONFIG["evaluate_interval"],

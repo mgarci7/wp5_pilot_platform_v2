@@ -62,9 +62,9 @@ class TestBuildModeratorSystemPrompt:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_injects_chatroom_context(self):
+    def test_accepts_chatroom_context_without_leaking_placeholder(self):
         result = build_moderator_system_prompt(chatroom_context="News discussion")
-        assert "News discussion" in result
+        assert "{CHATROOM_CONTEXT}" not in result
 
 
 # ── build_moderator_user_prompt ──────────────────────────────────────────────

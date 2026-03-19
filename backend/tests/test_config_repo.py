@@ -188,6 +188,16 @@ class TestValidateSimulationConfig:
         result = config_repo.validate_simulation_config(cfg)
         assert result["num_agents"] == 0
 
+    def test_bsc_model_version_defaults_to_v2(self):
+        result = config_repo.validate_simulation_config(_minimal_sim())
+        assert result["bsc_model_version"] == "v2"
+
+    def test_invalid_bsc_model_version(self):
+        cfg = _minimal_sim()
+        cfg["bsc_model_version"] = "v3"
+        with pytest.raises(ValueError, match="bsc_model_version"):
+            config_repo.validate_simulation_config(cfg)
+
 
 # ── validate_experimental_config ─────────────────────────────────────────────
 

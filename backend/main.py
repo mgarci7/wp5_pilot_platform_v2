@@ -632,6 +632,7 @@ class TestLLMRequest(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     max_tokens: int = 64
+    bsc_model_version: Optional[str] = None
 
 
 @app.post("/admin/test-llm")
@@ -668,6 +669,13 @@ async def admin_test_llm(body: TestLLMRequest, x_admin_key: str = Header(None)):
         "top_p": effective_top_p,
         "max_tokens": body.max_tokens,
     }
+    if provider == "bsc":
+        bsc_model_version = (body.bsc_model_version or "v2").lower()
+        if bsc_model_version not in {"v1", "v2"}:
+            raise HTTPException(status_code=422, detail="bsc_model_version must be 'v1' or 'v2'")
+        call_params["bsc_model_version"] = bsc_model_version
+    else:
+        bsc_model_version = None
 
     test_prompt = "Reply with exactly one sentence: The quick brown fox"
 
@@ -678,6 +686,7 @@ async def admin_test_llm(body: TestLLMRequest, x_admin_key: str = Header(None)):
             temperature=effective_temperature,
             top_p=effective_top_p,
             max_tokens=body.max_tokens,
+            bsc_model_version=bsc_model_version,
         )
     except Exception as e:
         return {

@@ -106,6 +106,7 @@ class TestFromSimulationConfig:
             mock_create.assert_called_once_with(
                 "anthropic", "claude-3",
                 temperature=None, top_p=None, max_tokens=None,
+                bsc_model_version=None,
             )
 
     def test_role_fallback_to_generic(self):
@@ -142,3 +143,14 @@ class TestCreateClient:
             MockGemini.return_value = MagicMock()
             client = _create_client(None)
             MockGemini.assert_called_once()
+
+    def test_bsc_model_version_only_passed_to_bsc(self):
+        with patch("utils.llm.provider.llm_anthropic.AnthropicClient") as MockAnthropic:
+            MockAnthropic.return_value = MagicMock()
+            _create_client("anthropic", model="claude-3", bsc_model_version="v1")
+            assert "bsc_model_version" not in MockAnthropic.call_args.kwargs
+
+        with patch("utils.llm.provider.llm_bsc.BSCClient") as MockBSC:
+            MockBSC.return_value = MagicMock()
+            _create_client("bsc", model="incivility", bsc_model_version="v1")
+            assert MockBSC.call_args.kwargs["bsc_model_version"] == "v1"

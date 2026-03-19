@@ -41,6 +41,7 @@ export async function testLlm(
     temperature?: number | null
     top_p?: number | null
     max_tokens?: number
+    bsc_model_version?: string
   },
 ): Promise<TestLLMResult> {
   const res = await adminFetch("/admin/test-llm", key, {

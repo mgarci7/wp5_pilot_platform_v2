@@ -154,14 +154,18 @@ class TestParseActionResponseValid:
         raw = json.dumps({
             "next_performer": "Alice",
             "action_type": "message",
-            "performer_instruction": {"objective": "say hi"},
+            "performer_instruction": {
+                "objective": "say hi",
+                "motivation": "join the conversation",
+                "directive": "keep it short",
+            },
         })
         data = parse_action_response(raw)
         assert data["next_performer"] == "Alice"
         assert data["action_type"] == "message"
 
     def test_json_in_markdown_fence(self):
-        raw = '```json\n{"next_performer":"Alice","action_type":"message","performer_instruction":{"objective":"greet"}}\n```'
+        raw = '```json\n{"next_performer":"Alice","action_type":"message","performer_instruction":{"objective":"greet","motivation":"be social","directive":"sound casual"}}\n```'
         data = parse_action_response(raw)
         assert data["next_performer"] == "Alice"
 
@@ -170,7 +174,11 @@ class TestParseActionResponseValid:
             "next_performer": "Bob",
             "action_type": "reply",
             "target_message_id": "msg-42",
-            "performer_instruction": {"objective": "agree"},
+            "performer_instruction": {
+                "objective": "agree",
+                "motivation": "support the point",
+                "directive": "be concise",
+            },
         })
         data = parse_action_response(raw)
         assert data["action_type"] == "reply"
@@ -190,7 +198,11 @@ class TestParseActionResponseValid:
             "next_performer": "Carol",
             "action_type": "@mention",
             "target_user": "Dave",
-            "performer_instruction": {"objective": "ask question"},
+            "performer_instruction": {
+                "objective": "ask question",
+                "motivation": "bring them back in",
+                "directive": "make it friendly",
+            },
         })
         data = parse_action_response(raw)
         assert data["target_user"] == "Dave"

@@ -145,6 +145,11 @@ def validate_simulation_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("'performer_memory_size' must be >= 0")
     out["performer_memory_size"] = pms
 
+    bsc_model_version = str(out.get("bsc_model_version") or "v2").lower()
+    if bsc_model_version not in {"v1", "v2"}:
+        raise ValueError("'bsc_model_version' must be 'v1' or 'v2'")
+    out["bsc_model_version"] = bsc_model_version
+
     return out
 
 

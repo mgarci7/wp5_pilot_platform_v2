@@ -143,8 +143,8 @@ class SimulationSession:
             state=self.state,
             logger=self.logger,
             evaluate_interval=int(self.simulation_config["evaluate_interval"]),
-            action_window_size=int(self.simulation_config["action_window_size"]),
-            performer_memory_size=int(self.simulation_config["performer_memory_size"]),
+            action_window_size=int(self.simulation_config.get("action_window_size", 10)),
+            performer_memory_size=int(self.simulation_config.get("performer_memory_size", 3)),
             chatroom_context=self.chatroom_context,
             ecological_criteria=self.ecological_criteria,
             classifier_prompt_template=self.simulation_config.get(

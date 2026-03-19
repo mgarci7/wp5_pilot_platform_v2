@@ -333,6 +333,7 @@ class TestHandleUserMessage:
     async def test_adds_to_state(self):
         with _patch_externals() as mocks:
             session, _ = _create_session()
+            session.running = True
             await session.handle_user_message("Hello!")
             assert len(session.state.messages) == 1
             assert session.state.messages[0].sender == "participant"
@@ -342,6 +343,7 @@ class TestHandleUserMessage:
     async def test_persists_to_db(self):
         with _patch_externals() as mocks:
             session, _ = _create_session()
+            session.running = True
             await session.handle_user_message("Hello!")
             mocks["message_repo"].insert_message.assert_called_once()
 
@@ -349,6 +351,7 @@ class TestHandleUserMessage:
     async def test_publishes_via_redis(self):
         with _patch_externals() as mocks:
             session, _ = _create_session()
+            session.running = True
             await session.handle_user_message("Hello!")
             mocks["redis"].publish_event.assert_called()
 
@@ -356,6 +359,7 @@ class TestHandleUserMessage:
     async def test_pushes_to_redis_window(self):
         with _patch_externals() as mocks:
             session, _ = _create_session()
+            session.running = True
             await session.handle_user_message("Hello!")
             mocks["redis"].push_to_window.assert_called()
 
@@ -363,6 +367,7 @@ class TestHandleUserMessage:
     async def test_reply_metadata(self):
         with _patch_externals() as mocks:
             session, _ = _create_session()
+            session.running = True
             await session.handle_user_message(
                 "I agree",
                 reply_to="msg-1",
@@ -382,6 +387,7 @@ class TestHandleUserMessage:
                 side_effect=RuntimeError("DB down")
             )
             session, _ = _create_session()
+            session.running = True
             # Should not raise
             await session.handle_user_message("Hello!")
             # Message still added to state
@@ -395,6 +401,7 @@ class TestHandleUserMessage:
                 side_effect=RuntimeError("Redis down")
             )
             session, ws = _create_session()
+            session.running = True
             await session.handle_user_message("Hello!")
             # The wrapped websocket_send should have been called as fallback
 

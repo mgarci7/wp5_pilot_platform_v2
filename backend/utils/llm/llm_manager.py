@@ -18,7 +18,7 @@ def _create_client(provider: str, model: str = None, temperature: float = None, 
         kwargs["top_p"] = top_p
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
-    if bsc_model_version is not None:
+    if provider == "bsc" and bsc_model_version is not None:
         kwargs["bsc_model_version"] = bsc_model_version
 
     if provider == "huggingface":

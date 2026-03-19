@@ -56,6 +56,13 @@ def _make_orchestrator(
     director_llm = AsyncMock()
     performer_llm = AsyncMock()
     moderator_llm = AsyncMock()
+    classifier_llm = AsyncMock()
+    classifier_llm.generate_response = AsyncMock(return_value=json.dumps({
+        "is_incivil": False,
+        "is_like_minded": None,
+        "inferred_participant_stance": None,
+        "rationale": "ok",
+    }))
 
     logger = _make_logger()
 
@@ -63,6 +70,7 @@ def _make_orchestrator(
         director_llm=director_llm,
         performer_llm=performer_llm,
         moderator_llm=moderator_llm,
+        classifier_llm=classifier_llm,
         state=state,
         logger=logger,
         evaluate_interval=10,

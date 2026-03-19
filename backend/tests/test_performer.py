@@ -58,11 +58,10 @@ class TestBuildPerformerSystemPrompt:
         assert len(result) > 0
 
     def test_system_prompt_is_concise(self):
-        """System prompt contains role instruction only; chatroom context is in user prompt."""
+        """The unified template injects chatroom context into the system prompt."""
         result = build_performer_system_prompt(chatroom_context="Climate debate")
         assert "chatroom" in result.lower()
-        # Chatroom context is in the {#USER} block, not the system prompt
-        assert "Climate debate" not in result
+        assert "Climate debate" in result
 
 
 # ── build_performer_user_prompt ────────────────────────────────────────────

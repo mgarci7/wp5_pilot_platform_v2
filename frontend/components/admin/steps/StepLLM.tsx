@@ -130,6 +130,7 @@ function LLMRoleConfig({
         temperature: temperature || undefined,
         top_p: topP || undefined,
         max_tokens: maxTokens,
+        bsc_model_version: provider === "bsc" ? (config.bsc_model_version ?? "v2") : undefined,
       })
       setTestResult(result)
       onTestResult?.(role, result.ok)

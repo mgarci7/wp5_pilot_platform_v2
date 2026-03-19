@@ -3,6 +3,7 @@
 import { useState } from "react"
 import type { ExperimentalConfig, TreatmentGroup, SeedArticle, FeatureMeta } from "../../../lib/admin-types"
 import { createExperimental3x3Preset } from "../../../lib/treatment-presets"
+import { createSeedFromTemplate, getNewsTemplateById, NEWS_TEMPLATE_OPTIONS } from "../../../lib/news-story-options"
 
 interface StepTreatmentsProps {
   config: ExperimentalConfig
@@ -11,17 +12,39 @@ interface StepTreatmentsProps {
 }
 
 const inputClass = "w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
+const DEFAULT_GROUP_FEATURES = ["news_article", "gate_until_user_post"]
 
 function SeedEditor({
   seed,
+  globalTemplateId,
   onChange,
+  onSelectTemplate,
 }: {
   seed: SeedArticle
+  globalTemplateId: string
   onChange: (seed: SeedArticle) => void
+  onSelectTemplate: (templateId: string) => void
 }) {
+  const globalLabel = NEWS_TEMPLATE_OPTIONS.find((option) => option.id === globalTemplateId)?.label ?? "none"
+
   return (
     <div className="space-y-3 pl-4 border-l-2 border-admin-border mt-3">
       <p className="text-xs font-medium text-admin-muted uppercase tracking-wider">Seed Article</p>
+      <div>
+        <label className="block text-xs font-medium text-admin-muted mb-1">Seed preset (per treatment)</label>
+        <select
+          value={seed.template_id || ""}
+          onChange={(e) => onSelectTemplate(e.target.value)}
+          className={inputClass}
+        >
+          <option value="">Use global preset ({globalLabel})</option>
+          {NEWS_TEMPLATE_OPTIONS.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
       <div>
         <label className="block text-xs font-medium text-admin-muted mb-1">Headline</label>
         <input
@@ -95,19 +118,23 @@ function FeatureCheckboxes({
 function GroupCard({
   name,
   group,
+  globalTemplateId,
   onChangeName,
   onChangeGroup,
+  onSelectGroupTemplate,
   onRemove,
   availableFeatures,
 }: {
   name: string
   group: TreatmentGroup
+  globalTemplateId: string
   onChangeName: (name: string) => void
   onChangeGroup: (group: TreatmentGroup) => void
+  onSelectGroupTemplate: (templateId: string) => void
   onRemove: () => void
   availableFeatures: FeatureMeta[]
 }) {
-  const features = group.features ?? []
+  const features = group.features ?? DEFAULT_GROUP_FEATURES
 
   return (
     <div className="bg-admin-surface rounded-lg border border-admin-border p-5 space-y-3">
@@ -149,8 +176,10 @@ function GroupCard({
 
       {features.includes("news_article") && (
         <SeedEditor
-          seed={group.seed || { type: "news_article", headline: "", source: "", body: "" }}
+          seed={group.seed || { type: "news_article", template_id: "", headline: "", source: "", body: "" }}
+          globalTemplateId={globalTemplateId}
           onChange={(seed) => onChangeGroup({ ...group, seed })}
+          onSelectTemplate={onSelectGroupTemplate}
         />
       )}
     </div>
@@ -161,17 +190,63 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
   const [showBuilder, setShowBuilder] = useState(false)
   const [dimA, setDimA] = useState({ name: "", levels: ["", ""] })
   const [dimB, setDimB] = useState({ name: "", levels: ["", ""] })
+  const [selectedNewsTemplate, setSelectedNewsTemplate] = useState("")
 
   const groupEntries = Object.entries(config.groups)
 
-  const addGroup = () => {
-    const newName = `group_${groupEntries.length + 1}`
+  const populateEmptySeedFields = (
+    groups: Record<string, TreatmentGroup>,
+    templateId: string
+  ): Record<string, TreatmentGroup> => {
+    const nextGroups: Record<string, TreatmentGroup> = {}
+    for (const [groupName, group] of Object.entries(groups)) {
+      const groupFeatures = group.features ?? DEFAULT_GROUP_FEATURES
+      if (!groupFeatures.includes("news_article")) {
+        nextGroups[groupName] = group
+        continue
+      }
+
+      const activeTemplateId = group.seed?.template_id || templateId
+      const template = getNewsTemplateById(activeTemplateId)
+      if (!template) {
+        nextGroups[groupName] = { ...group, features: groupFeatures }
+        continue
+      }
+
+      const currentSeed = group.seed ?? { type: "news_article", headline: "", source: "", body: "" }
+      nextGroups[groupName] = {
+        ...group,
+        features: groupFeatures,
+        seed: {
+          ...currentSeed,
+          type: "news_article",
+          template_id: currentSeed.template_id,
+          headline: currentSeed.headline.trim() ? currentSeed.headline : template.article.headline,
+          source: currentSeed.source.trim() ? currentSeed.source : template.article.source,
+          body: currentSeed.body.trim() ? currentSeed.body : template.article.body,
+        },
+      }
+    }
+    return nextGroups
+  }
+
+  const applyTemplateToCurrentGroups = (templateId: string) => {
     onChange({
       ...config,
-      groups: {
-        ...config.groups,
-        [newName]: { features: [], internal_validity_criteria: "" },
-      },
+      groups: populateEmptySeedFields(config.groups, templateId),
+    })
+  }
+
+  const addGroup = () => {
+    const newName = `group_${groupEntries.length + 1}`
+    const nextGroups: Record<string, TreatmentGroup> = {
+      ...config.groups,
+      [newName]: { features: [...DEFAULT_GROUP_FEATURES], internal_validity_criteria: "" },
+    }
+
+    onChange({
+      ...config,
+      groups: populateEmptySeedFields(nextGroups, selectedNewsTemplate),
     })
   }
 
@@ -183,7 +258,6 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
 
   const renameGroup = (oldName: string, newName: string) => {
     if (newName === oldName) return
-    // Allow empty string during editing so user can clear & retype
     const entries = Object.entries(config.groups)
     const newGroups: Record<string, TreatmentGroup> = {}
     for (const [k, v] of entries) {
@@ -199,23 +273,43 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
     })
   }
 
+  const applyTemplateToGroup = (groupName: string, templateId: string) => {
+    const group = config.groups[groupName]
+    if (!group) return
+
+    if (!templateId) {
+      const restSeed = { ...(group.seed || { type: "news_article", headline: "", source: "", body: "" }) }
+      delete restSeed.template_id
+      updateGroup(groupName, { ...group, seed: restSeed })
+      return
+    }
+
+    const seed = createSeedFromTemplate(templateId)
+    if (!seed) return
+    updateGroup(groupName, { ...group, seed })
+  }
+
   const generate2x2 = () => {
     const groups: Record<string, TreatmentGroup> = {}
     for (const a of dimA.levels) {
       for (const b of dimB.levels) {
         const slug = `${a}_${b}`.toLowerCase().replace(/[^a-z0-9_]/g, "_")
         groups[slug] = {
-          features: [],
+          features: [...DEFAULT_GROUP_FEATURES],
           internal_validity_criteria: "",
         }
       }
     }
-    onChange({ ...config, groups })
+    onChange({ ...config, groups: populateEmptySeedFields(groups, selectedNewsTemplate) })
     setShowBuilder(false)
   }
 
   const load3x3Preset = () => {
-    onChange(createExperimental3x3Preset())
+    const preset = createExperimental3x3Preset()
+    onChange({
+      ...preset,
+      groups: populateEmptySeedFields(preset.groups, selectedNewsTemplate),
+    })
     setShowBuilder(false)
   }
 
@@ -229,6 +323,31 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
       </div>
 
       <div className="bg-admin-surface rounded-lg border border-admin-border p-5 space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-admin-text mb-1">News story preset</label>
+          <select
+            value={selectedNewsTemplate}
+            onChange={(e) => {
+              const selectedId = e.target.value
+              setSelectedNewsTemplate(selectedId)
+              if (selectedId) {
+                applyTemplateToCurrentGroups(selectedId)
+              }
+            }}
+            className={inputClass}
+          >
+            <option value="">Select a story (optional)</option>
+            {NEWS_TEMPLATE_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-admin-faint mt-1">
+            Applies to all treatments with <code>news_article</code> and only fills empty fields. You can edit every treatment manually afterwards.
+          </p>
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-admin-text mb-1">Chatroom context</label>
           <textarea
@@ -259,7 +378,7 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
           onClick={() => setShowBuilder(!showBuilder)}
           className="text-xs font-medium text-admin-accent hover:text-admin-accent-hover underline underline-offset-2 transition-colors"
         >
-          {showBuilder ? "Hide 2\u00d72 builder" : "Generate 2\u00d72 design"}
+          {showBuilder ? "Hide 2×2 builder" : "Generate 2×2 design"}
         </button>
         <button
           onClick={load3x3Preset}
@@ -350,8 +469,10 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
             key={index}
             name={name}
             group={group}
+            globalTemplateId={selectedNewsTemplate}
             onChangeName={(newName) => renameGroup(name, newName)}
             onChangeGroup={(g) => updateGroup(name, g)}
+            onSelectGroupTemplate={(templateId) => applyTemplateToGroup(name, templateId)}
             onRemove={() => removeGroup(name)}
             availableFeatures={availableFeatures}
           />

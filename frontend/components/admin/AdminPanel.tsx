@@ -11,7 +11,6 @@ import StepTreatments from "./steps/StepTreatments"
 import StepTokens from "./steps/StepTokens"
 import StepReview from "./steps/StepReview"
 import { getMeta, saveConfig, updateConfig, listExperiments, getExperimentConfig } from "../../lib/admin-api"
-import { createExperimental3x3Preset } from "../../lib/treatment-presets"
 import type {
   SimulationConfig,
   ExperimentalConfig,
@@ -63,11 +62,27 @@ const DEFAULT_EXPERIMENTAL: ExperimentalConfig = {
   ecological_validity_criteria: "The conversation should be dialogic: agents should react to the state of the conversation, rather than talking past each other. There should be a mix of action types: approx. 30% message, 30% likes, 20% replies, 20% @mentions. Messages must be short (1-2 sentences, under 30 words) — brief, punchy contributions like in a real group chat. Tone and style should vary, with some containing emojis or punctuation. Messages should be 'reddit-like': informal, self-aware, and sometimes include internet humour, slang, and abbreviations.",
   redirect_url: "",
   groups: {
-    condition_1: { features: [], internal_validity_criteria: "" },
+    condition_1: { features: ["news_article", "gate_until_user_post"], internal_validity_criteria: "" },
   },
 }
 
 const DEFAULT_TOKENS: TokenConfig = { groups: {} }
+
+function getDefaultExperimentalConfig(): ExperimentalConfig {
+  return {
+    ...DEFAULT_EXPERIMENTAL,
+    groups: Object.fromEntries(
+      Object.entries(DEFAULT_EXPERIMENTAL.groups).map(([name, group]) => [
+        name,
+        {
+          ...group,
+          features: [...(group.features ?? [])],
+          seed: group.seed ? { ...group.seed } : undefined,
+        },
+      ])
+    ),
+  }
+}
 
 /** Format a Date as a `datetime-local` input value (YYYY-MM-DDTHH:MM). */
 function toLocalDatetimeString(d: Date): string {
@@ -128,7 +143,7 @@ export default function AdminPanel() {
 
   // Config state — initialized with frontend defaults for new experiments
   const [simulation, setSimulation] = useState<SimulationConfig>(DEFAULT_SIMULATION)
-  const [experimental, setExperimental] = useState<ExperimentalConfig>(DEFAULT_EXPERIMENTAL)
+  const [experimental, setExperimental] = useState<ExperimentalConfig>(getDefaultExperimentalConfig())
   const [tokens, setTokens] = useState<TokenConfig>(DEFAULT_TOKENS)
   const [meta, setMeta] = useState<AdminMeta | null>(null)
 
@@ -308,7 +323,7 @@ export default function AdminPanel() {
   const handleOpenWizard = useCallback(() => {
     // Reset wizard to fresh defaults for a new experiment
     setSimulation({ ...DEFAULT_SIMULATION })
-    setExperimental(createExperimental3x3Preset())
+    setExperimental(getDefaultExperimentalConfig())
     setTokens({ ...DEFAULT_TOKENS })
     setExperimentId("")
     setDescription("")

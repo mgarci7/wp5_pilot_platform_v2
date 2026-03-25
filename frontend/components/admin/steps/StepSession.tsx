@@ -81,6 +81,44 @@ export default function StepSession({ config, onChange, touched }: StepSessionPr
         </p>
       </div>
 
+      {/* Agent mode toggle */}
+      <div className="bg-admin-surface rounded-lg border border-admin-border p-5 space-y-3">
+        <h3 className="text-sm font-semibold text-admin-muted uppercase tracking-wider">Agent Mode</h3>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => onChange({ agent_mode: "prompt" })}
+            className={`px-4 py-3 rounded-lg border transition-colors text-left ${
+              (config.agent_mode ?? "prompt") === "prompt"
+                ? "border-admin-accent bg-admin-accent/10 text-admin-text"
+                : "border-admin-border hover:border-admin-accent/50 text-admin-muted"
+            }`}
+          >
+            <div className="font-medium text-sm">Prompt-based</div>
+            <div className="text-xs mt-1 opacity-75">
+              Director controls stance &amp; incivility via validity criteria prompts. Same agents for all treatments.
+            </div>
+          </button>
+          <button
+            onClick={() => onChange({ agent_mode: "pool" })}
+            className={`px-4 py-3 rounded-lg border transition-colors text-left ${
+              (config.agent_mode ?? "prompt") === "pool"
+                ? "border-admin-accent bg-admin-accent/10 text-admin-text"
+                : "border-admin-border hover:border-admin-accent/50 text-admin-muted"
+            }`}
+          >
+            <div className="font-medium text-sm">Agent pool</div>
+            <div className="text-xs mt-1 opacity-75">
+              Pre-defined agents with fixed stance, ideology &amp; incivility. Each treatment selects agents from the pool, and the participant survey helps choose the final lineup.
+            </div>
+          </button>
+        </div>
+        {(config.agent_mode ?? "prompt") === "pool" && (
+          <p className="text-xs text-admin-faint bg-admin-surface-alt border border-admin-border rounded p-3">
+            In pool mode, agents are configured per-treatment in the <strong>Treatments</strong> step. The agent names/personas above are ignored — each treatment picks its own candidate agents from the experiment pool, and the participant survey helps the backend decide the final live lineup.
+          </p>
+        )}
+      </div>
+
       <div className="bg-admin-surface rounded-lg border border-admin-border p-5 space-y-4">
         <h3 className="text-sm font-semibold text-admin-muted uppercase tracking-wider">Session</h3>
         <div className="grid grid-cols-2 gap-4">
@@ -305,4 +343,3 @@ export default function StepSession({ config, onChange, touched }: StepSessionPr
     </div>
   )
 }
-

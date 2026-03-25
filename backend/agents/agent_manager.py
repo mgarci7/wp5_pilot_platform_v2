@@ -46,6 +46,8 @@ class AgentManager:
             "inferred_participant_stance": message.inferred_participant_stance,
             "classification_rationale": message.classification_rationale,
         })
+        if isinstance(message.metadata, dict) and message.metadata.get("stance_confidence") is not None:
+            metadata["stance_confidence"] = message.metadata["stance_confidence"]
         try:
             pool = db_conn.get_pool()
             await message_repo.insert_message(

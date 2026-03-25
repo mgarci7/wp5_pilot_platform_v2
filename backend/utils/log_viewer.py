@@ -470,6 +470,7 @@ def render_session_start(ev: dict) -> str:
     experiment_id = _esc(data.get("experiment_id", ""))
     chatroom_context = data.get("chatroom_context", "")
     incivility_framework = data.get("incivility_framework", "")
+    participant_stance_hint = data.get("participant_stance_hint", "")
 
     exp_cfg = data.get("experimental_config", {})
     sim_cfg = data.get("simulation_config", {})
@@ -498,6 +499,18 @@ def render_session_start(ev: dict) -> str:
         parts.append(_config_row("Chatroom context", chatroom_context, mono=False))
     if incivility_framework:
         parts.append(_config_row("Incivility framework", incivility_framework, mono=False))
+    if participant_stance_hint:
+        hint_label = {
+            "favor": "In favor",
+            "against": "Against",
+            "skeptical": "Skeptical / unsure",
+        }.get(str(participant_stance_hint), str(participant_stance_hint))
+        parts.append(_config_row("Participant self-report", hint_label, mono=False))
+        parts.append(_config_row(
+            "Hint use",
+            "Used as a soft prior to choose like-minded / not-like-minded bots in agent-based mode; classifier inference still comes from the participant's messages.",
+            mono=False,
+        ))
 
     parts.append('    </div>')
 

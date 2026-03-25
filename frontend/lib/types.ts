@@ -50,3 +50,5 @@ export interface SessionStartResponse {
 }
 
 export type BlockedSenders = Record<string, string>
+
+export type ParticipantStance = "favor" | "against" | "skeptical"

@@ -1,14 +1,16 @@
 "use client"
 
 import { useState } from "react"
-import type { ExperimentalConfig, TreatmentGroup, SeedArticle, FeatureMeta } from "../../../lib/admin-types"
+import type { ExperimentalConfig, TreatmentGroup, SeedArticle, FeatureMeta, PoolAgent } from "../../../lib/admin-types"
 import { createExperimental3x3Preset } from "../../../lib/treatment-presets"
-import { createSeedFromTemplate, getNewsTemplateById, NEWS_TEMPLATE_OPTIONS } from "../../../lib/news-story-options"
+import { createSeedFromTemplate, getNewsTemplateById, NEWS_TEMPLATE_OPTIONS, type NewsTemplateId } from "../../../lib/news-story-options"
+import { DEFAULT_AGENT_POOL, autoSelectAgents, getAgentPoolPreset, parseTargetsFromCriteria } from "../../../lib/agent-pool-presets"
 
 interface StepTreatmentsProps {
   config: ExperimentalConfig
   onChange: (config: ExperimentalConfig) => void
   availableFeatures: FeatureMeta[]
+  agentMode: "prompt" | "pool"
 }
 
 const inputClass = "w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
@@ -115,6 +117,282 @@ function FeatureCheckboxes({
   )
 }
 
+const STANCE_BADGE: Record<string, { label: string; cls: string }> = {
+  agree:    { label: "Agree",    cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
+  disagree: { label: "Disagree", cls: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
+  neutral:  { label: "Neutral",  cls: "bg-gray-100 text-gray-600 dark:bg-gray-700/40 dark:text-gray-300" },
+}
+
+const INCIVILITY_BADGE: Record<string, { label: string; cls: string }> = {
+  civil:    { label: "Civil",    cls: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" },
+  moderate: { label: "Moderate", cls: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300" },
+  uncivil:  { label: "Uncivil",  cls: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300" },
+}
+
+const IDEOLOGY_BADGE: Record<string, { label: string; cls: string }> = {
+  left:   { label: "Left",   cls: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" },
+  center: { label: "Center", cls: "bg-stone-100 text-stone-700 dark:bg-stone-700/40 dark:text-stone-200" },
+  right:  { label: "Right",  cls: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" },
+}
+
+const DEFAULT_POOL_STANCE: PoolAgent["stance"] = "agree"
+const DEFAULT_POOL_INCIVILITY: PoolAgent["incivility"] = "civil"
+
+function makeNextPoolAgentId(pool: PoolAgent[]): string {
+  let idx = pool.length + 1
+  const existing = new Set(pool.map((agent) => agent.id))
+  while (existing.has(`agent_${idx}`)) idx += 1
+  return `agent_${idx}`
+}
+
+function AgentPoolEditor({
+  pool,
+  onChange,
+  selectedTemplateId,
+}: {
+  pool: PoolAgent[]
+  onChange: (pool: PoolAgent[]) => void
+  selectedTemplateId: string
+}) {
+  const addAgent = () => {
+    const next: PoolAgent = {
+      id: makeNextPoolAgentId(pool),
+      name: `Agente ${pool.length + 1}`,
+      stance: DEFAULT_POOL_STANCE,
+      incivility: DEFAULT_POOL_INCIVILITY,
+      ideology: "center",
+      persona: "",
+    }
+    onChange([...pool, next])
+  }
+
+  const updateAgent = (index: number, updates: Partial<PoolAgent>) => {
+    onChange(pool.map((agent, i) => (i === index ? { ...agent, ...updates } : agent)))
+  }
+
+  const removeAgent = (index: number) => {
+    onChange(pool.filter((_, i) => i !== index))
+  }
+
+  const loadDefaultPool = () => {
+    onChange(selectedTemplateId ? getAgentPoolPreset(selectedTemplateId) : DEFAULT_AGENT_POOL.map((agent) => ({ ...agent })))
+  }
+
+  return (
+    <div className="bg-admin-surface rounded-lg border border-admin-border p-5 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-admin-muted uppercase tracking-wider">Agent Pool</h3>
+          <p className="text-xs text-admin-faint mt-1">
+            Define the fixed agents used by the experiment when the session runs in pool mode.
+            The Director still follows the treatment&apos;s internal validity criteria; the pool only makes that behaviour more consistent.
+            The participant&apos;s pre-session stance is used as an extra hint when selecting the final live agents.
+            {selectedTemplateId ? " The selected news story has a matching topic pool." : ""}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={loadDefaultPool}
+            className="px-3 py-1.5 text-xs font-medium border border-admin-border rounded-lg text-admin-muted hover:border-admin-accent/50 hover:text-admin-text transition-colors"
+          >
+            {selectedTemplateId ? "Load story pool" : "Load default pool"}
+          </button>
+          <button
+            type="button"
+            onClick={addAgent}
+            className="px-3 py-1.5 text-xs font-medium bg-admin-accent text-white rounded-lg hover:bg-admin-accent-hover transition-colors"
+          >
+            + Add agent
+          </button>
+        </div>
+      </div>
+
+      {pool.length === 0 && (
+        <div className="rounded-lg border border-dashed border-admin-border p-4 text-sm text-admin-faint">
+          No pool agents yet. Add a few agents, then assign them to each treatment below.
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {pool.map((agent, index) => (
+          <div key={agent.id} className="rounded-lg border border-admin-border p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-admin-muted mb-1">ID</label>
+                  <input
+                    type="text"
+                    value={agent.id}
+                    readOnly
+                    className={`${inputClass} font-mono opacity-80`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-admin-muted mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={agent.name}
+                    onChange={(e) => updateAgent(index, { name: e.target.value })}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-admin-muted mb-1">Stance</label>
+                  <select
+                    value={agent.stance}
+                    onChange={(e) => updateAgent(index, { stance: e.target.value as PoolAgent["stance"] })}
+                    className={inputClass}
+                  >
+                    <option value="agree">Agree</option>
+                    <option value="disagree">Disagree</option>
+                    <option value="neutral">Neutral</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-admin-muted mb-1">Incivility</label>
+                  <select
+                    value={agent.incivility}
+                    onChange={(e) => updateAgent(index, { incivility: e.target.value as PoolAgent["incivility"] })}
+                    className={inputClass}
+                  >
+                    <option value="civil">Civil</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="uncivil">Uncivil</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-admin-muted mb-1">Ideology</label>
+                  <select
+                    value={agent.ideology || "center"}
+                    onChange={(e) => updateAgent(index, { ideology: e.target.value as PoolAgent["ideology"] })}
+                    className={inputClass}
+                  >
+                    <option value="left">Left</option>
+                    <option value="center">Center</option>
+                    <option value="right">Right</option>
+                  </select>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => removeAgent(index)}
+                className="text-xs text-red-500 hover:text-red-700 font-medium transition-colors mt-6"
+              >
+                Remove
+              </button>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-admin-muted mb-1">Persona</label>
+              <textarea
+                value={agent.persona}
+                onChange={(e) => updateAgent(index, { persona: e.target.value })}
+                rows={3}
+                className={`${inputClass} resize-vertical`}
+                placeholder="Describe the agent's personality, background, and communication style..."
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PoolAgentSelector({
+  pool,
+  selectedIds,
+  onChange,
+  criteria,
+}: {
+  pool: PoolAgent[]
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+  criteria: string
+}) {
+  const toggle = (id: string) => {
+    if (selectedIds.includes(id)) {
+      onChange(selectedIds.filter((i) => i !== id))
+    } else {
+      onChange([...selectedIds, id])
+    }
+  }
+
+  const handleAutoSelect = () => {
+    const targets = parseTargetsFromCriteria(criteria)
+    const ids = autoSelectAgents(pool, targets.likeMinded, targets.incivility, 5)
+    onChange(ids)
+  }
+
+  // Group by stance
+  const byStance: Record<string, PoolAgent[]> = {}
+  for (const agent of pool) {
+    if (!byStance[agent.stance]) byStance[agent.stance] = []
+    byStance[agent.stance].push(agent)
+  }
+
+  return (
+    <div className="space-y-3 border-t border-admin-border pt-3">
+      <div className="flex items-center justify-between">
+        <label className="block text-xs font-medium text-admin-muted uppercase tracking-wider">
+          Pool agents ({selectedIds.length} selected)
+        </label>
+        <button
+          type="button"
+          onClick={handleAutoSelect}
+          className="text-xs font-medium border border-admin-accent/40 rounded-lg px-2.5 py-1 bg-admin-surface text-admin-accent hover:bg-admin-accent/10"
+          title="Auto-select 5 agents based on treatment targets"
+        >
+          Auto-select
+        </button>
+      </div>
+      {pool.length === 0 && (
+        <div className="rounded-lg border border-dashed border-admin-border px-3 py-2 text-xs text-admin-faint">
+          No agents have been added to the pool yet. Use the agent pool editor above to load or create agents, then assign them here.
+          The backend will use the participant&apos;s survey answer to choose the final agents from this candidate pool.
+        </div>
+      )}
+      {Object.entries(byStance).map(([stance, agents]) => (
+        <div key={stance}>
+          <p className="text-xs text-admin-faint mb-1 capitalize">{stance}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {agents.map((agent) => {
+              const selected = selectedIds.includes(agent.id)
+              const stanceBadge = STANCE_BADGE[agent.stance] ?? STANCE_BADGE.neutral
+              const incivilBadge = INCIVILITY_BADGE[agent.incivility] ?? INCIVILITY_BADGE.civil
+              const ideologyBadge = IDEOLOGY_BADGE[agent.ideology || "center"] ?? IDEOLOGY_BADGE.center
+              return (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => toggle(agent.id)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
+                    selected
+                      ? "border-admin-accent bg-admin-accent/10 text-admin-text ring-1 ring-admin-accent/30"
+                      : "border-admin-border text-admin-muted hover:border-admin-accent/40"
+                  }`}
+                  title={agent.persona}
+                >
+                  <span className="font-medium">{agent.name}</span>
+                  <span className={`px-1 py-0.5 rounded text-[10px] leading-none ${stanceBadge.cls}`}>
+                    {stanceBadge.label}
+                  </span>
+                  <span className={`px-1 py-0.5 rounded text-[10px] leading-none ${incivilBadge.cls}`}>
+                    {incivilBadge.label}
+                  </span>
+                  <span className={`px-1 py-0.5 rounded text-[10px] leading-none ${ideologyBadge.cls}`}>
+                    {ideologyBadge.label}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function GroupCard({
   name,
   group,
@@ -124,6 +402,8 @@ function GroupCard({
   onSelectGroupTemplate,
   onRemove,
   availableFeatures,
+  agentMode,
+  agentPool,
 }: {
   name: string
   group: TreatmentGroup
@@ -133,6 +413,8 @@ function GroupCard({
   onSelectGroupTemplate: (templateId: string) => void
   onRemove: () => void
   availableFeatures: FeatureMeta[]
+  agentMode: "prompt" | "pool"
+  agentPool: PoolAgent[]
 }) {
   const features = group.features ?? DEFAULT_GROUP_FEATURES
 
@@ -174,6 +456,15 @@ function GroupCard({
         />
       </div>
 
+      {agentMode === "pool" && agentPool.length > 0 && (
+        <PoolAgentSelector
+          pool={agentPool}
+          selectedIds={group.pool_agent_ids || []}
+          onChange={(ids) => onChangeGroup({ ...group, pool_agent_ids: ids })}
+          criteria={group.internal_validity_criteria}
+        />
+      )}
+
       {features.includes("news_article") && (
         <SeedEditor
           seed={group.seed || { type: "news_article", template_id: "", headline: "", source: "", body: "" }}
@@ -186,13 +477,52 @@ function GroupCard({
   )
 }
 
-export default function StepTreatments({ config, onChange, availableFeatures }: StepTreatmentsProps) {
+export default function StepTreatments({ config, onChange, availableFeatures, agentMode }: StepTreatmentsProps) {
   const [showBuilder, setShowBuilder] = useState(false)
   const [dimA, setDimA] = useState({ name: "", levels: ["", ""] })
   const [dimB, setDimB] = useState({ name: "", levels: ["", ""] })
   const [selectedNewsTemplate, setSelectedNewsTemplate] = useState("")
 
   const groupEntries = Object.entries(config.groups)
+  const agentPool = config.agent_pool || []
+
+  const updateAgentPool = (pool: PoolAgent[]) => {
+    const validIds = new Set(pool.map((agent) => agent.id))
+    const groups: Record<string, TreatmentGroup> = {}
+    for (const [name, group] of Object.entries(config.groups)) {
+      groups[name] = {
+        ...group,
+        pool_agent_ids: (group.pool_agent_ids || []).filter((id) => validIds.has(id)),
+      }
+    }
+    onChange({
+      ...config,
+      agent_pool: pool,
+      groups,
+    })
+  }
+
+  const applyPoolPreset = (
+    baseConfig: ExperimentalConfig,
+    templateId: NewsTemplateId
+  ): ExperimentalConfig => {
+    const pool = getAgentPoolPreset(templateId)
+    const poolIds = pool.map((agent) => agent.id)
+    const groups: Record<string, TreatmentGroup> = {}
+
+    for (const [name, group] of Object.entries(baseConfig.groups)) {
+      groups[name] = {
+        ...group,
+        pool_agent_ids: [...poolIds],
+      }
+    }
+
+    return {
+      ...baseConfig,
+      agent_pool: pool,
+      groups,
+    }
+  }
 
   const populateEmptySeedFields = (
     groups: Record<string, TreatmentGroup>,
@@ -231,17 +561,28 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
   }
 
   const applyTemplateToCurrentGroups = (templateId: string) => {
-    onChange({
+    let nextConfig: ExperimentalConfig = {
       ...config,
       groups: populateEmptySeedFields(config.groups, templateId),
-    })
+    }
+
+    if (agentMode === "pool" && templateId) {
+      nextConfig = applyPoolPreset(nextConfig, templateId as NewsTemplateId)
+    }
+
+    onChange(nextConfig)
   }
 
   const addGroup = () => {
+    const defaultPoolIds = agentMode === "pool" ? agentPool.map((agent) => agent.id) : []
     const newName = `group_${groupEntries.length + 1}`
     const nextGroups: Record<string, TreatmentGroup> = {
       ...config.groups,
-      [newName]: { features: [...DEFAULT_GROUP_FEATURES], internal_validity_criteria: "" },
+      [newName]: {
+        features: [...DEFAULT_GROUP_FEATURES],
+        internal_validity_criteria: "",
+        pool_agent_ids: defaultPoolIds,
+      },
     }
 
     onChange({
@@ -290,6 +631,7 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
   }
 
   const generate2x2 = () => {
+    const defaultPoolIds = agentMode === "pool" ? agentPool.map((agent) => agent.id) : []
     const groups: Record<string, TreatmentGroup> = {}
     for (const a of dimA.levels) {
       for (const b of dimB.levels) {
@@ -297,6 +639,7 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
         groups[slug] = {
           features: [...DEFAULT_GROUP_FEATURES],
           internal_validity_criteria: "",
+          pool_agent_ids: defaultPoolIds,
         }
       }
     }
@@ -305,11 +648,17 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
   }
 
   const load3x3Preset = () => {
-    const preset = createExperimental3x3Preset()
-    onChange({
+    const preset = createExperimental3x3Preset(selectedNewsTemplate || undefined)
+    let nextConfig: ExperimentalConfig = {
       ...preset,
       groups: populateEmptySeedFields(preset.groups, selectedNewsTemplate),
-    })
+    }
+
+    if (agentMode === "pool" && selectedNewsTemplate) {
+      nextConfig = applyPoolPreset(nextConfig, selectedNewsTemplate as NewsTemplateId)
+    }
+
+    onChange(nextConfig)
     setShowBuilder(false)
   }
 
@@ -319,6 +668,7 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
         <h2 className="text-lg font-semibold text-admin-text">Treatment Groups</h2>
         <p className="text-sm text-admin-muted mt-1">
           Define the shared chatroom setup, optional incivility framework, and treatment conditions for each group.
+          In agent mode, the pool sets who can speak, while the Director still steers the conversation toward the internal validity criteria.
         </p>
       </div>
 
@@ -345,6 +695,7 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
           </select>
           <p className="text-xs text-admin-faint mt-1">
             Applies to all treatments with <code>news_article</code> and only fills empty fields. You can edit every treatment manually afterwards.
+            {agentMode === "pool" ? " In agent mode, selecting a story also loads its matching topic pool preset." : ""}
           </p>
         </div>
 
@@ -384,6 +735,10 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
           <p className="text-xs text-admin-faint mt-1">What &ldquo;realistic&rdquo; means for this chatroom. The Director uses this to maintain natural conversational flow. Shared across all treatment groups.</p>
         </div>
       </div>
+
+      {agentMode === "pool" && (
+        <AgentPoolEditor pool={agentPool} onChange={updateAgentPool} selectedTemplateId={selectedNewsTemplate} />
+      )}
 
       {/* 2x2 builder */}
       <div className="flex items-center gap-3">
@@ -488,6 +843,8 @@ export default function StepTreatments({ config, onChange, availableFeatures }: 
             onSelectGroupTemplate={(templateId) => applyTemplateToGroup(name, templateId)}
             onRemove={() => removeGroup(name)}
             availableFeatures={availableFeatures}
+            agentMode={agentMode}
+            agentPool={agentPool}
           />
         ))}
       </div>

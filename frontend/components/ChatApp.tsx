@@ -40,6 +40,11 @@ export default function ChatApp() {
       reporting={chat.reporting}
       performReport={chat.performReport}
       typingCount={chat.typingCount}
+      newsArticle={chat.newsArticle}
+      newsArticleModalOpen={chat.newsArticleModalOpen}
+      dismissNewsArticle={chat.dismissNewsArticle}
+      participantStance={chat.participantStance}
+      onConfirmParticipantStance={chat.submitParticipantStance}
     />
   )
 }

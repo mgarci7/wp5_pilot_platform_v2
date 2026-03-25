@@ -2,6 +2,13 @@
 
 Este README está pensado para alguien que **parte de cero**: máquina nueva, sin nada preparado, y quiere levantar la plataforma localmente usando este repositorio.
 
+## Documentacion de pipeline
+
+Si quieres una explicacion concreta del pipeline conversacional actual, incluyendo `prompt-based`, `agent-based`, `self-report`, seleccion de bots y loop del Director:
+
+- [Pipeline README](./docs/PIPELINE-README.md)
+- [Pipeline Diagram](./docs/pipeline-diagram.svg)
+
 ## 1) Requisitos previos (instalar desde cero)
 
 ### 1.1 Git

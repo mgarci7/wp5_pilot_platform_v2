@@ -16,13 +16,14 @@ async def create_session(
     experiment_id: str,
     treatment_group: str,
     user_name: str,
+    participant_stance: Optional[str] = None,
 ) -> None:
     """Insert a new session row with status='pending'."""
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO sessions(session_id, token, experiment_id, treatment_group, user_name, status)
-            VALUES($1, $2, $3, $4, $5, 'pending')
+            INSERT INTO sessions(session_id, token, experiment_id, treatment_group, user_name, participant_stance, status)
+            VALUES($1, $2, $3, $4, $5, $6, 'pending')
             ON CONFLICT(session_id) DO NOTHING
             """,
             session_id,
@@ -30,7 +31,28 @@ async def create_session(
             experiment_id,
             treatment_group,
             user_name,
+            participant_stance,
         )
+
+
+async def update_participant_stance(
+    pool: asyncpg.Pool,
+    *,
+    session_id: str,
+    participant_stance: Optional[str],
+) -> bool:
+    """Update the participant self-report on an existing session row."""
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE sessions
+            SET participant_stance = $1
+            WHERE session_id = $2
+            """,
+            participant_stance,
+            session_id,
+        )
+    return result.endswith("1")
 
 
 async def activate_session(

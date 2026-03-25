@@ -58,6 +58,7 @@ const DEFAULT_SIMULATION: SimulationConfig = {
   action_window_size: 5,
   performer_memory_size: 3,
   parallel_turns: 1,
+  agent_mode: "prompt",
 }
 
 const DEFAULT_EXPERIMENTAL: ExperimentalConfig = createExperimental3x3Preset()
@@ -67,6 +68,9 @@ const DEFAULT_TOKENS: TokenConfig = { groups: {} }
 function getDefaultExperimentalConfig(): ExperimentalConfig {
   return {
     ...DEFAULT_EXPERIMENTAL,
+    agent_pool: DEFAULT_EXPERIMENTAL.agent_pool
+      ? DEFAULT_EXPERIMENTAL.agent_pool.map((agent) => ({ ...agent }))
+      : undefined,
     groups: Object.fromEntries(
       Object.entries(DEFAULT_EXPERIMENTAL.groups).map(([name, group]) => [
         name,
@@ -517,6 +521,7 @@ export default function AdminPanel() {
       config={experimental}
       onChange={setExperimental}
       availableFeatures={meta.available_features}
+      agentMode={simulation.agent_mode ?? "prompt"}
     />,
     <StepTokens
       key="tokens"
@@ -555,5 +560,4 @@ export default function AdminPanel() {
     </div>
   )
 }
-
 

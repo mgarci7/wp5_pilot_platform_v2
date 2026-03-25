@@ -15,6 +15,7 @@ export const PARTICIPANT_SENDER = "participant"
 export const LS_SESSION_ID = "wp5_session_id"
 export const LS_USERNAME = "wp5_username"
 export const LS_BLOCKED = "wp5_blocked_senders"
+export const LS_PARTICIPANT_STANCE = "wp5_participant_stance"
 
 const SENDER_COLORS = [
   "#6366f1",

@@ -73,6 +73,7 @@ class SessionManager:
             experiment_id=experiment_id,
             treatment_group=info["treatment_group"],
             user_name=info.get("user_name", "participant"),
+            participant_stance=info.get("participant_stance"),
         )
 
     async def pop_pending(self, session_id: str) -> Dict:
@@ -89,6 +90,7 @@ class SessionManager:
         treatment_group: str,
         user_name: str = "participant",
         experiment_id: str = "default",
+        participant_stance: Optional[str] = None,
     ) -> SimulationSession:
         """Create, start, and register a new SimulationSession.
 
@@ -111,6 +113,7 @@ class SessionManager:
                 treatment_group=treatment_group,
                 user_name=user_name,
                 experiment_id=experiment_id,
+                participant_stance_hint=participant_stance,
                 _config=config,
             )
             self._sessions[session_id] = session
@@ -123,11 +126,45 @@ class SessionManager:
         await redis_client.cache_session(r, session_id, {
             "treatment_group": treatment_group,
             "user_name": user_name,
+            "participant_stance": participant_stance or "",
             "experiment_id": experiment_id,
             "status": "active",
         })
 
         return session
+
+    async def update_participant_stance(
+        self,
+        session_id: str,
+        participant_stance: Optional[str],
+    ) -> bool:
+        """Persist a participant self-report and refresh the live session if present."""
+        async with self._lock:
+            pending = self._pending.get(session_id)
+            if pending is not None:
+                pending["participant_stance"] = participant_stance
+
+        pool = db_conn.get_pool()
+        updated = await session_repo.update_participant_stance(
+            pool,
+            session_id=session_id,
+            participant_stance=participant_stance,
+        )
+
+        session = await self.get_session(session_id)
+        if session:
+            await session.set_participant_stance_hint(participant_stance)
+            session.logger.log_event("participant_stance_update", {
+                "participant_stance": participant_stance or "",
+            })
+
+        r = redis_client.get_redis()
+        await redis_client.cache_session(r, session_id, {
+            "participant_stance": participant_stance or "",
+            "status": "active",
+        })
+
+        return updated
 
     async def get_session(self, session_id: str) -> Optional[SimulationSession]:
         """Return a session if it lives in this worker's process.
@@ -190,6 +227,7 @@ class SessionManager:
         meta = {
             "treatment_group": row["treatment_group"],
             "user_name": row["user_name"],
+            "participant_stance": row.get("participant_stance"),
             "experiment_id": row["experiment_id"],
             "status": row["status"],
             "started_at": started_at,
@@ -206,6 +244,7 @@ class SessionManager:
         experiment_id = meta.get("experiment_id", "default")
         treatment_group = meta["treatment_group"]
         user_name = meta.get("user_name", "participant")
+        participant_stance = meta.get("participant_stance")
 
         pool = db_conn.get_pool()
 
@@ -229,6 +268,7 @@ class SessionManager:
                 treatment_group=treatment_group,
                 user_name=user_name,
                 experiment_id=experiment_id,
+                participant_stance_hint=participant_stance,
                 _preloaded_messages=msg_rows,
                 _preloaded_blocks=block_rows,
                 _config=config,
@@ -243,6 +283,7 @@ class SessionManager:
         await redis_client.cache_session(r, session_id, {
             "treatment_group": treatment_group,
             "user_name": user_name,
+            "participant_stance": participant_stance or "",
             "experiment_id": experiment_id,
             "status": "active",
         })

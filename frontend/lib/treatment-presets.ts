@@ -1,4 +1,5 @@
 import type { ExperimentalConfig, TreatmentGroup } from "./admin-types"
+import { getAgentPoolPreset } from "./agent-pool-presets"
 
 export const CHATROOM_CONTEXT_3X3 = `This is a Spanish-language chatroom on Telegram, based in Spain. Messages must be written in Spanish.
 The participant has posted an opinion about a news article. The news article defines the topic of the discussion.
@@ -199,13 +200,16 @@ Do not change percentages.`,
   ],
 ];
 
-export function createExperimental3x3Preset(): ExperimentalConfig {
+export function createExperimental3x3Preset(templateId?: string): ExperimentalConfig {
   const groups: Record<string, TreatmentGroup> = {}
+  const pool = getAgentPoolPreset(templateId)
+  const poolAgentIds = pool.map((agent) => agent.id)
 
   for (const [groupName, internal_validity_criteria] of GROUP_TREATMENTS) {
     groups[groupName] = {
       features: ["news_article", "gate_until_user_post"],
       internal_validity_criteria,
+      pool_agent_ids: [...poolAgentIds],
     }
   }
 
@@ -215,5 +219,6 @@ export function createExperimental3x3Preset(): ExperimentalConfig {
     ecological_validity_criteria: ECOLOGICAL_VALIDITY_3X3,
     redirect_url: "",
     groups,
+    agent_pool: pool,
   }
 }

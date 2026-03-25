@@ -8,6 +8,8 @@ from models.agent import Agent
 from agents.STAGE.director import (
     format_chat_log,
     format_agent_profiles,
+    format_participant_hint,
+    format_treatment_fidelity_summary,
     parse_update_response,
     parse_evaluate_response,
     parse_action_response,
@@ -82,6 +84,51 @@ class TestFormatAgentProfiles:
         result = format_agent_profiles(profiles)
         assert "**Performer 1**: Took a sceptical stance" in result
         assert "**Performer 2**: (This performer has not acted yet.)" in result
+
+    def test_profiles_with_traits(self):
+        profiles = {"Performer 1": "Took a sceptical stance"}
+        traits = {"Performer 1": {"stance": "disagree", "incivility": "uncivil", "ideology": "right"}}
+        result = format_agent_profiles(profiles, traits=traits)
+        assert "Fixed traits" in result
+        assert "stance=disagree" in result
+        assert "incivility=uncivil" in result
+        assert "ideology=right" in result
+
+
+class TestFormatParticipantHint:
+    def test_empty_hint(self):
+        assert "No pre-session stance survey" in format_participant_hint(None)
+
+    def test_favor_hint(self):
+        result = format_participant_hint("favor")
+        assert "in favor" in result
+
+
+class TestFormatTreatmentFidelitySummary:
+    def test_empty_messages(self):
+        assert "No classifier-derived treatment metrics yet" in format_treatment_fidelity_summary([])
+
+    def test_summary_with_messages(self):
+        msgs = [
+            _msg(
+                sender="Alice",
+                content="Hi",
+                is_incivil=False,
+                is_like_minded=True,
+                inferred_participant_stance="pro social spending",
+                metadata={"stance_confidence": "high"},
+            ),
+            _msg(
+                sender="Bob",
+                content="Rude",
+                is_incivil=True,
+                is_like_minded=False,
+            ),
+        ]
+        result = format_treatment_fidelity_summary(msgs)
+        assert "Incivil messages: 1/2" in result
+        assert "Like-minded messages: 1/2" in result
+        assert "confidence=high" in result
 
 
 # ── parse_update_response — valid inputs ─────────────────────────────────────

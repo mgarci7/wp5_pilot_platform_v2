@@ -50,18 +50,111 @@ def format_chat_log(messages: List[Message]) -> str:
     return "\n".join(lines)
 
 
-def format_agent_profiles(profiles: Dict[str, str]) -> str:
+def format_agent_profiles(
+    profiles: Dict[str, str],
+    traits: Optional[Dict[str, Dict[str, str]]] = None,
+) -> str:
     """Format performer profiles dict into a readable string for prompts."""
     if not profiles:
         return "(No performer profiles yet — this is the start of the session.)"
 
     lines = []
     for name, profile in profiles.items():
+        trait_suffix = ""
+        if traits:
+            trait = traits.get(name)
+            if trait:
+                trait_bits = []
+                stance = trait.get("stance")
+                incivility = trait.get("incivility")
+                ideology = trait.get("ideology")
+                if stance:
+                    trait_bits.append(f"stance={stance}")
+                if incivility:
+                    trait_bits.append(f"incivility={incivility}")
+                if ideology:
+                    trait_bits.append(f"ideology={ideology}")
+                if trait_bits:
+                    trait_suffix = f" [Fixed traits: {', '.join(trait_bits)}]"
+
         if profile:
-            lines.append(f"**{name}**: {profile}")
+            lines.append(f"**{name}**: {profile}{trait_suffix}")
         else:
-            lines.append(f"**{name}**: (This performer has not acted yet.)")
+            base = f"**{name}**: (This performer has not acted yet.)"
+            lines.append(f"{base}{trait_suffix}")
     return "\n\n".join(lines)
+
+
+def format_participant_hint(participant_stance_hint: Optional[str]) -> str:
+    """Format the participant's pre-session self-report for the Director."""
+    if not participant_stance_hint:
+        return "(No pre-session stance survey was provided.)"
+
+    labels = {
+        "favor": "participant self-report: in favor of the article",
+        "against": "participant self-report: against the article",
+        "skeptical": "participant self-report: skeptical / unsure about the article",
+    }
+    return labels.get(participant_stance_hint, f"participant self-report: {participant_stance_hint}")
+
+
+def format_treatment_fidelity_summary(messages: List[Message]) -> str:
+    """Summarise classifier-derived treatment fidelity signals for the Director."""
+    agent_messages = [m for m in messages if m.is_incivil is not None or m.is_like_minded is not None]
+    if not agent_messages:
+        return "(No classifier-derived treatment metrics yet.)"
+
+    classified_incivility = [m for m in agent_messages if m.is_incivil is not None]
+    stance_classified = [m for m in agent_messages if m.is_like_minded is not None]
+
+    def _pct(num: int, den: int) -> Optional[float]:
+        return round(100.0 * num / den, 1) if den > 0 else None
+
+    incivil_count = sum(1 for m in classified_incivility if m.is_incivil)
+    like_minded_count = sum(1 for m in stance_classified if m.is_like_minded)
+
+    lines = [
+        f"Agent messages with classifier output: {len(agent_messages)}",
+        f"Incivil messages: {incivil_count}/{len(classified_incivility)}"
+        + (
+            f" ({_pct(incivil_count, len(classified_incivility))}%)"
+            if classified_incivility
+            else ""
+        ),
+        f"Stance-classified messages: {len(stance_classified)}",
+        f"Like-minded messages: {like_minded_count}/{len(stance_classified)}"
+        + (
+            f" ({_pct(like_minded_count, len(stance_classified))}%)"
+            if stance_classified
+            else ""
+        ),
+    ]
+
+    latest = next((m for m in reversed(messages) if m.is_incivil is not None or m.is_like_minded is not None), None)
+    if latest:
+        extra = []
+        if latest.inferred_participant_stance:
+            extra.append(f"participant stance={latest.inferred_participant_stance}")
+        confidence = None
+        if isinstance(latest.metadata, dict):
+            confidence = latest.metadata.get("stance_confidence")
+        if confidence is None:
+            confident_message = next(
+                (
+                    m
+                    for m in reversed(messages)
+                    if isinstance(m.metadata, dict) and m.metadata.get("stance_confidence") is not None
+                ),
+                None,
+            )
+            if confident_message and isinstance(confident_message.metadata, dict):
+                confidence = confident_message.metadata.get("stance_confidence")
+        if confidence:
+            extra.append(f"confidence={confidence}")
+        if extra:
+            lines.append(f"Latest classifier read: {', '.join(extra)}")
+
+    return "\n".join(f"- {line}" for line in lines)
 
 
 # ── Update prompts (Call 1) ─────────────────────────────────────────────────
@@ -191,6 +284,8 @@ def build_evaluate_user_prompt(
     internal_validity_criteria: str = "",
     ecological_criteria: str = "",
     chatroom_context: str = "",
+    participant_stance_hint: str = "",
+    treatment_fidelity_summary: str = "",
     action_counts: Optional[Dict[str, int]] = None,
     performer_counts: Optional[Dict[str, int]] = None,
     exclude_performer: Optional[str] = None,
@@ -206,10 +301,12 @@ def build_evaluate_user_prompt(
     raw = template if (isinstance(template, str) and template.strip()) else _EVALUATE_TEMPLATE
     prompt = _render_prompt(raw, "user")
     prompt = prompt.replace("{CHATROOM_CONTEXT}", chatroom_context)
+    prompt = prompt.replace("{PARTICIPANT_STANCE_HINT}", participant_stance_hint)
     prompt = prompt.replace("{INTERNAL_VALIDITY_CRITERIA}", internal_validity_criteria)
     prompt = prompt.replace("{ECOLOGICAL_VALIDITY_CRITERIA}", ecological_criteria)
     prompt = prompt.replace("{PREVIOUS_INTERNAL_VALIDITY_EVALUATION}", prev_internal)
     prompt = prompt.replace("{PREVIOUS_ECOLOGICAL_VALIDITY_EVALUATION}", prev_ecological)
+    prompt = prompt.replace("{TREATMENT_FIDELITY_SUMMARY}", treatment_fidelity_summary)
     prompt = prompt.replace("{ACTION_SUMMARY}", action_summary)
     prompt = prompt.replace("{PARTICIPATION_SUMMARY}", participation_summary)
     prompt = prompt.replace("{RECENT_CHAT_LOG}", chat_log)
@@ -258,22 +355,27 @@ def build_action_user_prompt(
     internal_validity_summary: str,
     ecological_validity_summary: str,
     chatroom_context: str = "",
+    participant_stance_hint: str = "",
+    treatment_fidelity_summary: str = "",
     performer_counts: Optional[Dict[str, int]] = None,
     action_counts: Optional[Dict[str, int]] = None,
     exclude_performer: Optional[str] = None,
+    agent_traits: Optional[Dict[str, Dict[str, str]]] = None,
     template: Optional[str] = None,
 ) -> str:
     """Build the Director Action user prompt with dynamic data."""
     chat_log = format_chat_log(messages)
-    profiles_str = format_agent_profiles(agent_profiles)
+    profiles_str = format_agent_profiles(agent_profiles, traits=agent_traits)
     participation_summary = format_participation_summary(performer_counts, exclude_performer=exclude_performer) if performer_counts else "(No actions yet)"
     action_summary = format_action_summary(action_counts) if action_counts else "(No actions yet)"
 
     raw = template if (isinstance(template, str) and template.strip()) else _ACTION_TEMPLATE
     prompt = _render_prompt(raw, "user")
     prompt = prompt.replace("{CHATROOM_CONTEXT}", chatroom_context)
+    prompt = prompt.replace("{PARTICIPANT_STANCE_HINT}", participant_stance_hint)
     prompt = prompt.replace("{INTERNAL_VALIDITY_SUMMARY}", internal_validity_summary)
     prompt = prompt.replace("{ECOLOGICAL_VALIDITY_SUMMARY}", ecological_validity_summary)
+    prompt = prompt.replace("{TREATMENT_FIDELITY_SUMMARY}", treatment_fidelity_summary)
     prompt = prompt.replace("{AGENT_PROFILES}", profiles_str)
     prompt = prompt.replace("{PARTICIPATION_SUMMARY}", participation_summary)
     prompt = prompt.replace("{ACTION_SUMMARY}", action_summary)

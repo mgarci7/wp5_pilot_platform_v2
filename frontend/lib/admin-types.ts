@@ -44,6 +44,20 @@ export interface SimulationConfig {
   humanize_max_emoji?: number
   bsc_model_version?: string
   parallel_turns?: number
+  agent_mode?: "prompt" | "pool"
+}
+
+export type AgentStance = "agree" | "disagree" | "neutral"
+export type AgentIncivility = "civil" | "moderate" | "uncivil"
+export type AgentIdeology = "left" | "center" | "right"
+
+export interface PoolAgent {
+  id: string
+  name: string
+  stance: AgentStance
+  incivility: AgentIncivility
+  ideology?: AgentIdeology
+  persona: string
 }
 
 export interface SeedArticle {
@@ -58,6 +72,7 @@ export interface TreatmentGroup {
   features: string[]
   internal_validity_criteria: string
   seed?: SeedArticle
+  pool_agent_ids?: string[]
 }
 
 export interface ExperimentalConfig {
@@ -66,6 +81,7 @@ export interface ExperimentalConfig {
   ecological_validity_criteria: string
   redirect_url: string
   groups: Record<string, TreatmentGroup>
+  agent_pool?: PoolAgent[]
 }
 
 export interface TokenConfig {

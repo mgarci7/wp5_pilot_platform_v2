@@ -26,6 +26,7 @@ from agents.STAGE.director import (
     build_update_system_prompt, build_update_user_prompt, parse_update_response,
     build_evaluate_system_prompt, build_evaluate_user_prompt, parse_evaluate_response,
     build_action_system_prompt, build_action_user_prompt, parse_action_response,
+    format_treatment_fidelity_summary, format_participant_hint,
 )
 from agents.STAGE.performer import build_performer_system_prompt, build_performer_user_prompt
 from agents.STAGE.moderator import build_moderator_system_prompt, build_moderator_user_prompt, parse_moderator_response
@@ -140,6 +141,7 @@ class Orchestrator:
         chatroom_context: str = "",
         incivility_framework: str = "",
         ecological_criteria: str = "",
+        agent_traits: Optional[Dict[str, Dict[str, str]]] = None,
         classifier_prompt_template: Optional[str] = None,
         performer_prompt_template: Optional[str] = None,
         director_action_prompt_template: Optional[str] = None,
@@ -161,6 +163,9 @@ class Orchestrator:
         self.chatroom_context = chatroom_context
         self.incivility_framework = incivility_framework
         self.ecological_criteria = ecological_criteria
+        self._agent_traits = agent_traits or {}
+        self.participant_stance_hint = getattr(state, "participant_stance_hint", None)
+        self._participant_hint_text = format_participant_hint(self.participant_stance_hint)
         self.classifier_prompt_template = (
             classifier_prompt_template
             if isinstance(classifier_prompt_template, str) and classifier_prompt_template.strip()
@@ -258,6 +263,20 @@ class Orchestrator:
         # Evaluate and Action system prompts deferred until first execute_turn (need internal_validity_criteria).
         self._evaluate_system_prompt: Optional[str] = None
         self._action_system_prompt: Optional[str] = None
+
+    def set_participant_stance_hint(self, participant_stance_hint: Optional[str]) -> None:
+        """Refresh the soft prior used in prompts and report summaries."""
+        self.participant_stance_hint = participant_stance_hint
+        self._participant_hint_text = format_participant_hint(participant_stance_hint)
+
+    def _format_treatment_fidelity_summary(self) -> str:
+        """Summarise classifier-derived treatment fidelity across the session."""
+        agent_messages = [
+            message
+            for message in self.state.messages
+            if message.sender != self.state.user_name
+        ]
+        return format_treatment_fidelity_summary(agent_messages)
 
     async def _classify_message(self, agent_message: str) -> Dict[str, Optional[object]]:
         """Run the post-moderation classifier stage for a generated message."""
@@ -711,6 +730,9 @@ class Orchestrator:
             inferred_participant_stance=classification.get("inferred_participant_stance"),
             classification_rationale=classification.get("classification_rationale"),
         )
+        stance_confidence = classification.get("stance_confidence")
+        if stance_confidence:
+            message.metadata["stance_confidence"] = stance_confidence
 
         self._action_counts[action_type] = self._action_counts.get(action_type, 0) + 1
         anon_name = self._name_map.get(agent_name, agent_name)
@@ -812,6 +834,8 @@ class Orchestrator:
                 chatroom_context=self.chatroom_context,
                 incivility_framework=self.incivility_framework,
             ),
+            participant_stance_hint=self._participant_hint_text,
+            treatment_fidelity_summary=self._format_treatment_fidelity_summary(),
             action_counts=self._action_counts,
             performer_counts=self._performer_counts,
             exclude_performer=self._anon_user,
@@ -879,6 +903,13 @@ class Orchestrator:
 
         profiles = override_profiles if override_profiles is not None else self.agent_profiles
         perf_counts = override_perf_counts if override_perf_counts is not None else self._performer_counts
+        anon_traits = None
+        if self._agent_traits:
+            anon_traits = {
+                self._name_map.get(real_name, real_name): traits
+                for real_name, traits in self._agent_traits.items()
+                if self._name_map.get(real_name, real_name) in profiles
+            }
 
         action_user = build_action_user_prompt(
             messages=anon_recent,
@@ -889,9 +920,12 @@ class Orchestrator:
                 chatroom_context=self.chatroom_context,
                 incivility_framework=self.incivility_framework,
             ),
+            participant_stance_hint=self._participant_hint_text,
+            treatment_fidelity_summary=self._format_treatment_fidelity_summary(),
             performer_counts=perf_counts,
             action_counts=self._action_counts,
             exclude_performer=self._anon_user,
+            agent_traits=anon_traits,
             template=self.director_action_prompt_template,
         )
 

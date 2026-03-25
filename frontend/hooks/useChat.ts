@@ -1,11 +1,12 @@
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useEffect } from "react"
 import { useWebSocket } from "./useWebSocket"
 import { useLocalStorage } from "./useLocalStorage"
-import { PARTICIPANT_SENDER, LS_SESSION_ID, LS_USERNAME, LS_BLOCKED } from "@/lib/constants"
+import { PARTICIPANT_SENDER, LS_SESSION_ID, LS_USERNAME, LS_BLOCKED, LS_PARTICIPANT_STANCE } from "@/lib/constants"
 import {
   startSession as apiStartSession,
   likeMessage as apiLikeMessage,
   reportMessage as apiReportMessage,
+  updateParticipantStance as apiUpdateParticipantStance,
 } from "@/lib/api"
 import { detectMentions } from "@/lib/mentions"
 import type {
@@ -15,6 +16,7 @@ import type {
   LikeEvent,
   ReportEvent,
   BlockEvent,
+  ParticipantStance,
 } from "@/lib/types"
 
 export function useChat() {
@@ -24,6 +26,10 @@ export function useChat() {
     null,
   )
   const [username, setUsername] = useLocalStorage<string>(LS_USERNAME, "")
+  const [participantStance, setParticipantStance] = useLocalStorage<ParticipantStance | null>(
+    LS_PARTICIPANT_STANCE,
+    null,
+  )
   const [blockedSenders, setBlockedSenders] = useLocalStorage<BlockedSenders>(
     LS_BLOCKED,
     {},
@@ -45,6 +51,7 @@ export function useChat() {
   const [reportModalOpen, setReportModalOpen] = useState(false)
   const [reportTarget, setReportTarget] = useState<Message | null>(null)
   const [reporting, setReporting] = useState(false)
+  const [newsArticleModalOpen, setNewsArticleModalOpen] = useState(false)
 
   // Derived: participants list from observed senders
   const participants = useMemo(() => {
@@ -53,6 +60,11 @@ export function useChat() {
     )
     return [...set]
   }, [messages])
+
+  const newsArticle = useMemo(
+    () => messages.find((m) => m.msg_type === "news_article") || null,
+    [messages],
+  )
 
   // Derived: detected mentions from current input
   const detectedMentions = useMemo(
@@ -115,13 +127,38 @@ export function useChat() {
     onSessionInvalid: handleSessionInvalid,
   })
 
+  useEffect(() => {
+    if (!sessionId || !newsArticle) return
+    const seenKey = `news_article_seen:${sessionId}`
+    if (typeof window !== "undefined" && window.sessionStorage.getItem(seenKey) !== "1") {
+      setNewsArticleModalOpen(true)
+    }
+  }, [sessionId, newsArticle])
+
   // Start session — username never leaves the frontend (privacy by design).
   // The backend always uses "participant" as the sender identity.
   const startSession = async (token: string, name: string) => {
     const data = await apiStartSession(token)
     setSessionId(data.session_id)
     if (name) setUsername(name)
+    setParticipantStance(null)
   }
+
+  const submitParticipantStance = useCallback(
+    async (stance: ParticipantStance) => {
+      if (!sessionId) return
+      await apiUpdateParticipantStance(sessionId, stance)
+      setParticipantStance(stance)
+    },
+    [sessionId, setParticipantStance],
+  )
+
+  const dismissNewsArticle = useCallback(() => {
+    if (sessionId && typeof window !== "undefined") {
+      window.sessionStorage.setItem(`news_article_seen:${sessionId}`, "1")
+    }
+    setNewsArticleModalOpen(false)
+  }, [sessionId])
 
   // Send message
   const sendMessage = () => {
@@ -270,6 +307,9 @@ export function useChat() {
   // Filtered messages (respecting blocked senders)
   const visibleMessages = useMemo(() => {
     return messages.filter((msg) => {
+      if (newsArticleModalOpen && msg.msg_type === "news_article") {
+        return false
+      }
       const blockedIso = blockedSenders[msg.sender]
       if (!blockedIso) return true
       try {
@@ -278,13 +318,14 @@ export function useChat() {
         return true
       }
     })
-  }, [messages, blockedSenders])
+  }, [messages, blockedSenders, newsArticleModalOpen])
 
   return {
     // Session
     sessionId,
     username,
     setUsername,
+    participantStance,
     startSession,
     // Connection
     isConnected,
@@ -309,6 +350,10 @@ export function useChat() {
     setReportTarget,
     reporting,
     performReport,
+    newsArticle,
+    newsArticleModalOpen,
+    dismissNewsArticle,
+    submitParticipantStance,
     // Blocked
     blockedSenders,
     // Typing indicator

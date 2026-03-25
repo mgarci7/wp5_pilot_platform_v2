@@ -8,6 +8,12 @@ Here is the chatroom context, as described by the researcher for this experiment
 
 `{CHATROOM_CONTEXT}`
 
+## Participant Self-Report
+
+If available, use this as a soft prior when selecting which performer should act next and which agents best fit the current treatment. It is not ground truth and should never override the treatment criteria or the classifier's later inference.
+
+`{PARTICIPANT_STANCE_HINT}`
+
 {#SYSTEM}
 Complete instructions and the corresponding data you need for each step will be provided in the user message below.
 {/SYSTEM}
@@ -22,6 +28,11 @@ Read the validity evaluations below. They describe the current state of the chat
 **Internal validity**: {INTERNAL_VALIDITY_SUMMARY}
 
 **Ecological validity**: {ECOLOGICAL_VALIDITY_SUMMARY}
+
+**Observed treatment fidelity**
+These are the live classifier outputs for agent messages so far.
+
+{TREATMENT_FIDELITY_SUMMARY}
 {/USER}
 
 ### Step 2: Select a Performer

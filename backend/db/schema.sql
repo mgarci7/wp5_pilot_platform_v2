@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     experiment_id       TEXT        NOT NULL REFERENCES experiments(experiment_id),
     treatment_group     TEXT        NOT NULL,
     user_name           TEXT        NOT NULL,
+    participant_stance   TEXT,
     -- pending | active | ended | crashed
     status              TEXT        NOT NULL DEFAULT 'pending',
     random_seed         INT,
@@ -107,6 +108,10 @@ EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
 DO $$ BEGIN
     ALTER TABLE experiments ADD COLUMN paused BOOLEAN DEFAULT FALSE;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+DO $$ BEGIN
+    ALTER TABLE sessions ADD COLUMN participant_stance TEXT;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
 

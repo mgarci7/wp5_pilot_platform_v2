@@ -5,6 +5,8 @@ import ChatHeader from "./ChatHeader"
 import MessageFeed from "./MessageFeed"
 import InputBar from "./InputBar"
 import ReportModal from "./ReportModal"
+import NewsArticleModal from "./NewsArticleModal"
+import type { ParticipantStance } from "@/lib/types"
 
 interface ChatRoomProps {
   // Messages
@@ -31,6 +33,11 @@ interface ChatRoomProps {
   reporting: boolean
   performReport: (block: boolean) => void
   typingCount: number
+  newsArticle: Message | null
+  newsArticleModalOpen: boolean
+  dismissNewsArticle: () => void
+  participantStance: ParticipantStance | null
+  onConfirmParticipantStance: (stance: ParticipantStance) => Promise<void>
 }
 
 export default function ChatRoom({
@@ -51,6 +58,11 @@ export default function ChatRoom({
   reporting,
   performReport,
   typingCount,
+  newsArticle,
+  newsArticleModalOpen,
+  dismissNewsArticle,
+  participantStance,
+  onConfirmParticipantStance,
 }: ChatRoomProps) {
   return (
     <div className="flex flex-col h-dvh max-w-3xl mx-auto bg-bg-surface shadow-lg relative">
@@ -91,6 +103,16 @@ export default function ChatRoom({
             setReportModalOpen(false)
             setReportTarget(null)
           }}
+        />
+      )}
+
+      {newsArticle && (
+        <NewsArticleModal
+          message={newsArticle}
+          open={newsArticleModalOpen}
+          onClose={dismissNewsArticle}
+          participantStance={participantStance}
+          onConfirmParticipantStance={onConfirmParticipantStance}
         />
       )}
     </div>

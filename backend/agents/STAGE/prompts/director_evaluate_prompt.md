@@ -8,6 +8,12 @@ Here is the chatroom context, as described by the researcher for this experiment
 
 `{CHATROOM_CONTEXT}`
 
+## Participant Self-Report
+
+If available, treat this as a soft prior only. The classifier still infers stance from the participant's actual messages, and the Director still evaluates the experiment against the researcher-defined criteria.
+
+`{PARTICIPANT_STANCE_HINT}`
+
 ## Researcher-Defined Criteria
 
 Here are the two validity criteria defined by the researcher for this experiment:
@@ -68,4 +74,10 @@ Respond with a JSON object using exactly this structure:
 ## Recent Chat Log
 
 {RECENT_CHAT_LOG}
+
+## Observed Treatment Fidelity
+
+These are the live classifier outputs for agent messages so far.
+
+{TREATMENT_FIDELITY_SUMMARY}
 {/USER}

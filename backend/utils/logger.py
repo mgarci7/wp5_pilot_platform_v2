@@ -70,12 +70,14 @@ class Logger:
         *,
         chatroom_context: str = "",
         incivility_framework: str = "",
+        participant_stance_hint: str = "",
     ) -> None:
         self.log_event("session_start", {
             "treatment_group": treatment_group,
             "experiment_id": self.experiment_id,
             "chatroom_context": chatroom_context,
             "incivility_framework": incivility_framework,
+            "participant_stance_hint": participant_stance_hint,
             "experimental_config": experimental_config,
             "simulation_config": simulation_config,
         })

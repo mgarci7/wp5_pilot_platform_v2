@@ -67,6 +67,10 @@ export default function LoginScreen({
           <p className="text-sm text-secondary mt-1">
             Enter your token to join the discussion
           </p>
+          <p className="text-xs text-secondary mt-2 leading-5 max-w-xs mx-auto">
+            After you enter, you will read the article in a pop-up and choose whether you are in favor, against,
+            or skeptical. That self-report is used as a hint for agent selection in <span className="font-medium">agent-based</span> mode.
+          </p>
         </div>
 
         {/* Form */}

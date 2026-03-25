@@ -1,15 +1,29 @@
 import { API_BASE } from "./constants"
-import type { SessionStartResponse } from "./types"
+import type { ParticipantStance, SessionStartResponse } from "./types"
 
 export async function startSession(
   token: string,
+  participantStance?: ParticipantStance,
 ): Promise<SessionStartResponse> {
   const res = await fetch(`${API_BASE}/session/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ token, participant_stance: participantStance }),
   })
   if (!res.ok) throw new Error("Invalid token")
+  return res.json()
+}
+
+export async function updateParticipantStance(
+  sessionId: string,
+  participantStance: ParticipantStance,
+): Promise<{ session_id: string; participant_stance: ParticipantStance }> {
+  const res = await fetch(`${API_BASE}/session/${sessionId}/participant-stance`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ participant_stance: participantStance }),
+  })
+  if (!res.ok) throw new Error("Failed to update participant stance")
   return res.json()
 }
 

@@ -17,6 +17,8 @@ class SessionState:
     duration_minutes: int = 15
     # Canonical identifier for the human participant (privacy-safe; real name never leaves frontend)
     user_name: str = "participant"
+    # Optional pre-session self-report used as a prior when selecting pool agents.
+    participant_stance_hint: Optional[str] = None
     experimental_config: dict = field(default_factory=dict)
     simulation_config: dict = field(default_factory=dict)
     treatment_group: Optional[str] = None

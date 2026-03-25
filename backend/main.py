@@ -144,11 +144,16 @@ app.add_middleware(
 
 class SessionStartRequest(BaseModel):
     token: str
+    participant_stance: Optional[Literal["favor", "against", "skeptical"]] = None
 
 
 class SessionStartResponse(BaseModel):
     session_id: str
     message: str
+
+
+class ParticipantStanceUpdateRequest(BaseModel):
+    participant_stance: Literal["favor", "against", "skeptical"]
 
 
 class LikeRequest(BaseModel):
@@ -218,7 +223,12 @@ async def start_session(request: SessionStartRequest):
 
     await session_manager.reserve_pending(
         session_id,
-        {"treatment_group": group, "user_name": "participant", "token": request.token},
+        {
+            "treatment_group": group,
+            "user_name": "participant",
+            "token": request.token,
+            "participant_stance": request.participant_stance,
+        },
         experiment_id=experiment_id,
     )
 
@@ -226,6 +236,18 @@ async def start_session(request: SessionStartRequest):
         session_id=session_id,
         message=f"Session created (group: {group}). Connect via WebSocket to start.",
     )
+
+
+@app.post("/session/{session_id}/participant-stance")
+async def update_participant_stance(session_id: str, request: ParticipantStanceUpdateRequest):
+    """Update the participant self-report after they read the seed article."""
+    updated = await session_manager.update_participant_stance(session_id, request.participant_stance)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session_id,
+        "participant_stance": request.participant_stance,
+    }
 
 
 @app.get("/health")
@@ -279,6 +301,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             return
 
         user_name = pending.get("user_name", "participant")
+        participant_stance = pending.get("participant_stance")
         experiment_id = pending.get("experiment_id")
         if not experiment_id:
             await websocket.close(code=1008)
@@ -292,6 +315,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 treatment_group=treatment_group,
                 user_name=user_name,
                 experiment_id=experiment_id,
+                participant_stance=participant_stance,
             )
         except RuntimeError as e:
             print(f"WebSocket session creation failed for {session_id}: {e}")
@@ -497,11 +521,15 @@ async def session_report(session_id: str):
         # Skip "message" events — messages are loaded separately from the messages table
         if evt["event_type"] == "message":
             continue
+        data = evt["data"]
+        if evt["event_type"] == "session_start" and isinstance(data, dict):
+            if not data.get("participant_stance_hint") and row.get("participant_stance"):
+                data = {**data, "participant_stance_hint": row.get("participant_stance")}
         lines.append({
             "timestamp": evt["occurred_at"],
             "event_type": evt["event_type"],
             "session_id": session_id,
-            "data": evt["data"],
+            "data": data,
         })
 
     for msg in messages:

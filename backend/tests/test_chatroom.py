@@ -41,8 +41,9 @@ MINIMAL_EXP_CONFIG = {
             "features": [],
         },
         "treatment_a": {
-            "internal_validity_criteria": "Be provocative.",
+            "internal_validity_criteria": "INCIVILITY_TARGET = 50\nLIKEMINDED_TARGET = 50\nBe provocative.",
             "features": ["news_article"],
+            "pool_agent_ids": ["a1", "a2", "a3"],
             "seed": {
                 "headline": "Breaking",
                 "source": "AP",
@@ -50,6 +51,32 @@ MINIMAL_EXP_CONFIG = {
             },
         },
     },
+    "agent_pool": [
+        {
+            "id": "a1",
+            "name": "Lucia",
+            "stance": "agree",
+            "incivility": "civil",
+            "ideology": "left",
+            "persona": "Supportive and civil.",
+        },
+        {
+            "id": "a2",
+            "name": "Carlos",
+            "stance": "disagree",
+            "incivility": "uncivil",
+            "ideology": "right",
+            "persona": "Opposed and rude.",
+        },
+        {
+            "id": "a3",
+            "name": "Pablo",
+            "stance": "neutral",
+            "incivility": "civil",
+            "ideology": "center",
+            "persona": "Skeptical and calm.",
+        },
+    ],
 }
 
 MINIMAL_CONFIG = {
@@ -67,6 +94,7 @@ def _patch_externals():
         with patch("platforms.chatroom.db_conn") as mock_db, \
              patch("platforms.chatroom.redis_client") as mock_redis, \
              patch("platforms.chatroom.session_repo") as mock_session_repo, \
+             patch("platforms.chatroom.config_repo") as mock_config_repo, \
              patch("platforms.chatroom.message_repo") as mock_message_repo, \
              patch("platforms.chatroom.LLMManager") as MockLLMManager:
 
@@ -77,6 +105,7 @@ def _patch_externals():
             mock_redis.subscribe_session = AsyncMock()
             mock_session_repo.activate_session = AsyncMock()
             mock_session_repo.end_session = AsyncMock()
+            mock_config_repo.get_experiment_config = AsyncMock(return_value=MINIMAL_CONFIG)
             mock_message_repo.insert_message = AsyncMock()
             mock_message_repo.get_session_messages = AsyncMock(return_value=[])
 
@@ -89,6 +118,7 @@ def _patch_externals():
                 "db": mock_db,
                 "redis": mock_redis,
                 "session_repo": mock_session_repo,
+                "config_repo": mock_config_repo,
                 "message_repo": mock_message_repo,
                 "LLMManager": MockLLMManager,
             }
@@ -200,6 +230,81 @@ class TestSimulationSessionInit:
             assert session.state.session_id == "test-session"
             assert session.state.user_name == "participant"
             assert session.state.duration_minutes == 30
+
+    def test_pool_mode_uses_participant_hint(self):
+        pool_config = {
+            "simulation": {
+                **MINIMAL_SIM_CONFIG,
+                "agent_mode": "pool",
+                "num_agents": 2,
+            },
+            "experimental": MINIMAL_EXP_CONFIG,
+        }
+        with _patch_externals():
+            session, _ = _create_session(config=pool_config, participant_stance_hint="favor")
+            assert session.participant_stance_hint == "favor"
+            assert [agent.name for agent in session.state.agents] == ["Lucia", "Carlos"]
+
+    def test_pool_mode_enforces_hard_roster_quotas_when_pool_allows_it(self):
+        quota_config = {
+            "simulation": {
+                **MINIMAL_SIM_CONFIG,
+                "agent_mode": "pool",
+                "num_agents": 5,
+            },
+            "experimental": {
+                "chatroom_context": "A test chatroom about science",
+                "groups": {
+                    "treatment_a": {
+                        "internal_validity_criteria": "INCIVILITY_TARGET = 80\nLIKEMINDED_TARGET = 80\nBe provocative.",
+                        "features": [],
+                        "pool_agent_ids": [
+                            "ag_c1", "ag_c2", "ag_u1", "ag_u2", "ag_u3",
+                            "di_c1", "di_c2", "di_u1", "di_u2", "di_u3",
+                            "ne_c1", "ne_u1",
+                        ],
+                    },
+                },
+                "agent_pool": [
+                    {"id": "ag_c1", "name": "AgreeCivil1", "stance": "agree", "incivility": "civil", "ideology": "left", "persona": ""},
+                    {"id": "ag_c2", "name": "AgreeCivil2", "stance": "agree", "incivility": "civil", "ideology": "center", "persona": ""},
+                    {"id": "ag_u1", "name": "AgreeUncivil1", "stance": "agree", "incivility": "uncivil", "ideology": "left", "persona": ""},
+                    {"id": "ag_u2", "name": "AgreeUncivil2", "stance": "agree", "incivility": "uncivil", "ideology": "center", "persona": ""},
+                    {"id": "ag_u3", "name": "AgreeUncivil3", "stance": "agree", "incivility": "uncivil", "ideology": "right", "persona": ""},
+                    {"id": "di_c1", "name": "DisagreeCivil1", "stance": "disagree", "incivility": "civil", "ideology": "right", "persona": ""},
+                    {"id": "di_c2", "name": "DisagreeCivil2", "stance": "disagree", "incivility": "civil", "ideology": "center", "persona": ""},
+                    {"id": "di_u1", "name": "DisagreeUncivil1", "stance": "disagree", "incivility": "uncivil", "ideology": "right", "persona": ""},
+                    {"id": "di_u2", "name": "DisagreeUncivil2", "stance": "disagree", "incivility": "uncivil", "ideology": "center", "persona": ""},
+                    {"id": "di_u3", "name": "DisagreeUncivil3", "stance": "disagree", "incivility": "uncivil", "ideology": "left", "persona": ""},
+                    {"id": "ne_c1", "name": "NeutralCivil1", "stance": "neutral", "incivility": "civil", "ideology": "center", "persona": ""},
+                    {"id": "ne_u1", "name": "NeutralUncivil1", "stance": "neutral", "incivility": "uncivil", "ideology": "center", "persona": ""},
+                ],
+            },
+        }
+
+        with _patch_externals():
+            session, _ = _create_session(treatment_group="treatment_a", config=quota_config, participant_stance_hint="favor")
+            traits = [session._agent_traits[agent.name] for agent in session.state.agents]
+
+            assert len(traits) == 5
+            assert sum(1 for trait in traits if trait["stance"] == "agree") == 4
+            assert sum(1 for trait in traits if trait["incivility"] == "uncivil") == 4
+
+    @pytest.mark.asyncio
+    async def test_pool_mode_updates_participant_hint_after_creation(self):
+        pool_config = {
+            "simulation": {
+                **MINIMAL_SIM_CONFIG,
+                "agent_mode": "pool",
+                "num_agents": 2,
+            },
+            "experimental": MINIMAL_EXP_CONFIG,
+        }
+        with _patch_externals():
+            session, _ = _create_session(config=pool_config, participant_stance_hint="favor")
+            await session.set_participant_stance_hint("against")
+            assert session.participant_stance_hint == "against"
+            assert session.state.participant_stance_hint == "against"
 
 
 # ── Preloaded messages (crash recovery) ──────────────────────────────────────

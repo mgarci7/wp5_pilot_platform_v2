@@ -1335,6 +1335,7 @@ async def admin_session_messages(
             {
                 "message_id": msg["message_id"],
                 "sender": msg["sender"],
+                "is_participant_message": msg["sender"] == session_row["user_name"],
                 "content": msg["content"],
                 "timestamp": msg["timestamp"],
                 "is_incivil": msg.get("is_incivil"),
@@ -1365,17 +1366,25 @@ async def admin_save_session_evaluation(
         raise HTTPException(status_code=404, detail="Session not found for this experiment")
 
     messages = await message_repo.get_session_messages(pool, session_id)
-    valid_message_ids = {msg["message_id"] for msg in messages}
+    participant_name = session_row["user_name"]
+    valid_message_ids = {
+        msg["message_id"]
+        for msg in messages
+        if msg["sender"] != participant_name
+    }
     request_ids = [row.message_id for row in request.rows]
     unknown_ids = sorted(set(request_ids) - valid_message_ids)
     if unknown_ids:
-        raise HTTPException(status_code=400, detail="Evaluation payload contains unknown message ids")
+        raise HTTPException(
+            status_code=400,
+            detail="Evaluation payload contains unknown or participant message ids",
+        )
 
     await message_repo.replace_manual_evaluations(
         pool,
         session_id=session_id,
         experiment_id=eid,
-        evaluations=[row.model_dump() for row in request.rows],
+        evaluations=[row.model_dump() for row in request.rows if row.message_id in valid_message_ids],
     )
     return {
         "status": "ok",
@@ -1511,6 +1520,7 @@ async def admin_evaluations_summary_csv(experiment_id: str, x_admin_key: str = H
             FROM sessions s
             LEFT JOIN messages m
                 ON m.session_id = s.session_id
+                AND m.sender != s.user_name
             LEFT JOIN manual_message_evaluations ev
                 ON ev.session_id = s.session_id
                 AND ev.message_id = m.message_id

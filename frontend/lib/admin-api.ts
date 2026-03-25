@@ -229,6 +229,7 @@ export interface AdminEvent {
 export interface SessionMessageForEvaluation {
   message_id: string
   sender: string
+  is_participant_message?: boolean
   content: string
   timestamp: string
   manual_evaluation?: {

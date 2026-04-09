@@ -14,8 +14,10 @@ import {
   resumeExperiment,
   downloadSessionsCSV,
   getComplianceStats,
+  getProviderKeys,
+  setProviderKey,
 } from "../../lib/admin-api"
-import type { SessionSummary, TokenGroupStats, SimulationConfig, ExperimentalConfig, ComplianceGroupStats } from "../../lib/admin-types"
+import type { SessionSummary, TokenGroupStats, SimulationConfig, ExperimentalConfig, ComplianceGroupStats, ProviderKeyStatus } from "../../lib/admin-types"
 import type { ExperimentSummary, AdminEvent } from "../../lib/admin-api"
 import { API_BASE } from "../../lib/constants"
 import type { AdminTheme } from "./AdminPanel"
@@ -725,6 +727,211 @@ function EventLogTab({ adminKey, experimentId, theme }: { adminKey: string; expe
   )
 }
 
+/* ── Provider API Keys panel ─────────────────────────────────────────────── */
+
+const PROVIDER_LABELS: Record<string, { label: string; docsUrl?: string }> = {
+  anthropic:   { label: "Anthropic (Claude)" },
+  gemini:      { label: "Google Gemini" },
+  huggingface: { label: "HuggingFace Inference" },
+  mistral:     { label: "Mistral" },
+  konstanz:    { label: "Konstanz vLLM" },
+  bsc:         { label: "BSC Incivility API" },
+}
+
+function ProviderKeysPanel({ adminKey }: { adminKey: string }) {
+  const [status, setStatus] = useState<Record<string, ProviderKeyStatus> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState<string | null>(null)      // provider being edited
+  const [draftKey, setDraftKey] = useState("")
+  const [draftExtra, setDraftExtra] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const [feedback, setFeedback] = useState<{ provider: string; ok: boolean; msg: string } | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await getProviderKeys(adminKey)
+      setStatus(data)
+    } catch {
+      /* ignore — show stale data */
+    }
+    setLoading(false)
+  }, [adminKey])
+
+  useEffect(() => { load() }, [load])
+
+  const startEdit = (provider: string) => {
+    setEditing(provider)
+    setDraftKey("")
+    setDraftExtra({})
+    setFeedback(null)
+  }
+
+  const cancelEdit = () => {
+    setEditing(null)
+    setDraftKey("")
+    setDraftExtra({})
+  }
+
+  const handleSave = async (provider: string) => {
+    if (!draftKey.trim()) return
+    setSaving(true)
+    setFeedback(null)
+    try {
+      const extra = Object.keys(draftExtra).length > 0 ? draftExtra : undefined
+      await setProviderKey(adminKey, provider, draftKey.trim(), extra)
+      setFeedback({ provider, ok: true, msg: "Key saved — effective immediately, no restart needed." })
+      setEditing(null)
+      setDraftKey("")
+      setDraftExtra({})
+      await load()
+    } catch (e) {
+      setFeedback({ provider, ok: false, msg: e instanceof Error ? e.message : "Save failed" })
+    }
+    setSaving(false)
+  }
+
+  return (
+    <div className="bg-admin-surface rounded-lg border border-admin-border overflow-hidden">
+      <div className="px-5 py-3 border-b border-admin-border bg-admin-raised flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-admin-text">API Keys</h3>
+          <p className="text-xs text-admin-muted mt-0.5">
+            Keys are stored in the server&apos;s <code>.env</code> file only — never in the database or returned to the browser.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading}
+          className="text-xs text-admin-accent hover:underline disabled:opacity-50"
+        >
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      <div className="divide-y divide-admin-border">
+        {status === null && loading && (
+          <div className="px-5 py-4 text-sm text-admin-muted">Loading…</div>
+        )}
+        {status !== null && Object.entries(status).map(([provider, info]) => {
+          const label = PROVIDER_LABELS[provider]?.label ?? provider
+          const isEditing = editing === provider
+
+          return (
+            <div key={provider} className="px-5 py-4 space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold flex-shrink-0 ${info.configured ? "bg-green-500/10 text-green-600 dark:text-green-400" : "bg-admin-border text-admin-muted"}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${info.configured ? "bg-green-500" : "bg-admin-muted"}`} />
+                    {info.configured ? "Configured" : "Not set"}
+                  </span>
+                  <span className="text-sm font-medium text-admin-text truncate">{label}</span>
+                  <span className="text-xs text-admin-faint font-mono hidden sm:block">{info.key_var}</span>
+                </div>
+                {!isEditing && (
+                  <button
+                    type="button"
+                    onClick={() => startEdit(provider)}
+                    className="text-xs font-medium px-2.5 py-1 rounded-lg border border-admin-border hover:border-admin-accent text-admin-muted hover:text-admin-accent transition-colors flex-shrink-0"
+                  >
+                    {info.configured ? "Update" : "Add key"}
+                  </button>
+                )}
+              </div>
+
+              {/* Extra vars (e.g. BSC endpoint URL) — show current status even when not editing */}
+              {info.extra && !isEditing && (
+                <div className="pl-8 space-y-1">
+                  {Object.entries(info.extra).map(([varName, extraInfo]) => (
+                    <div key={varName} className="flex items-center gap-2 text-xs text-admin-muted">
+                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${extraInfo.configured ? "bg-green-500" : "bg-admin-muted"}`} />
+                      <span className="font-mono">{varName}</span>
+                      <span className="text-admin-faint">({extraInfo.label})</span>
+                      <span>{extraInfo.configured ? "— set" : "— not set"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {isEditing && (
+                <div className="pl-0 space-y-3 pt-1">
+                  <div>
+                    <label className="block text-xs font-medium text-admin-muted mb-1">
+                      New value for <code>{info.key_var}</code>
+                    </label>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={draftKey}
+                      onChange={(e) => setDraftKey(e.target.value)}
+                      placeholder="Paste your API key here"
+                      className="w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-bg text-admin-text font-mono focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
+                    />
+                    <p className="text-xs text-admin-faint mt-1">
+                      The key is sent over HTTPS and written directly to the server&apos;s <code>.env</code> file. It is never stored in the database or shown again.
+                    </p>
+                  </div>
+
+                  {/* Extra fields (e.g. BSC_API_BASE_URL) */}
+                  {info.extra && Object.entries(info.extra).map(([varName, extraInfo]) => (
+                    <div key={varName}>
+                      <label className="block text-xs font-medium text-admin-muted mb-1">
+                        <code>{varName}</code> — {extraInfo.label}
+                        {extraInfo.configured && <span className="ml-1 text-admin-faint">(currently set — leave blank to keep existing)</span>}
+                      </label>
+                      <input
+                        type="text"
+                        autoComplete="off"
+                        value={draftExtra[varName] ?? ""}
+                        onChange={(e) => setDraftExtra((prev) => ({ ...prev, [varName]: e.target.value }))}
+                        placeholder={extraInfo.configured ? "Leave blank to keep existing value" : "e.g. http://212.128.226.126/incivility/api/v1"}
+                        className="w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-bg text-admin-text font-mono focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
+                      />
+                    </div>
+                  ))}
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSave(provider)}
+                      disabled={saving || !draftKey.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-admin-accent text-white text-xs font-medium hover:bg-admin-accent/90 disabled:opacity-50 transition-colors"
+                    >
+                      {saving ? "Saving…" : "Save key"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEdit}
+                      disabled={saving}
+                      className="px-3 py-1.5 rounded-lg border border-admin-border text-xs font-medium text-admin-muted hover:text-admin-text transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  {feedback?.provider === provider && (
+                    <p className={`text-xs font-medium ${feedback.ok ? "text-green-600 dark:text-green-400" : "text-red-500"}`}>
+                      {feedback.msg}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Feedback shown after edit closed */}
+              {!isEditing && feedback?.provider === provider && (
+                <p className={`text-xs font-medium pl-0 ${feedback.ok ? "text-green-600 dark:text-green-400" : "text-red-500"}`}>
+                  {feedback.msg}
+                </p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /* ── Settings tab (danger zone) ──────────────────────────────────────────── */
 
 type DangerAction = "reset_sessions" | "delete_experiment"
@@ -801,6 +1008,9 @@ function SettingsTab({
 
   return (
     <div className="space-y-6">
+      {/* API Key management */}
+      <ProviderKeysPanel adminKey={adminKey} />
+
       {/* Experiment control — pause/resume */}
       {selectedExperiment && (
         <div className="bg-admin-surface rounded-lg border border-admin-pastel-amber-text/20 overflow-hidden">

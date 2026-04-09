@@ -632,6 +632,147 @@ async def admin_verify(x_admin_key: str = Header(None)):
     return {"status": "ok"}
 
 
+# ── Provider key management ───────────────────────────────────────────────────
+# Keys are stored only in the .env file on disk and in os.environ in-process.
+# The API NEVER returns key values — only present/absent status.
+
+# Map provider name → (env var name, optional extra env vars)
+_PROVIDER_KEY_MAP: dict[str, dict] = {
+    "anthropic":   {"key_var": "ANTHROPIC_API_KEY"},
+    "gemini":      {"key_var": "GEMINI_API_KEY"},
+    "huggingface": {"key_var": "HF_API_KEY"},
+    "mistral":     {"key_var": "MISTRAL_API_KEY"},
+    "konstanz":    {"key_var": "KONSTANZ_API_KEY"},
+    "bsc":         {"key_var": "BSC_API_KEY", "extra": {"BSC_API_BASE_URL": "Endpoint URL"}},
+}
+
+_PLACEHOLDER = "your_api_key_here"
+
+
+def _find_dotenv_path() -> Optional[str]:
+    """Find the .env file — check repo root and backend dir."""
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "..", ".env"),
+        os.path.join(os.path.dirname(__file__), ".env"),
+        ".env",
+    ]
+    for c in candidates:
+        p = os.path.abspath(c)
+        if os.path.isfile(p):
+            return p
+    # If none exists yet, return the repo-root path so we can create it.
+    return os.path.abspath(candidates[0])
+
+
+def _read_dotenv_lines(path: str) -> list[str]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.readlines()
+    except FileNotFoundError:
+        return []
+
+
+def _write_env_var(var: str, value: str) -> None:
+    """Write or update a single env var in the .env file and os.environ.
+
+    Security: value is written directly to disk — never logged or returned.
+    """
+    path = _find_dotenv_path()
+    lines = _read_dotenv_lines(path)
+
+    # Replace existing line if present, otherwise append.
+    found = False
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(f"{var}=") or stripped.startswith(f"{var} ="):
+            new_lines.append(f"{var}={value}\n")
+            found = True
+        else:
+            new_lines.append(line)
+
+    if not found:
+        # Add a blank line before if file doesn't end with one.
+        if new_lines and not new_lines[-1].endswith("\n\n"):
+            if new_lines[-1].strip():
+                new_lines.append("\n")
+        new_lines.append(f"{var}={value}\n")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+
+    # Also update the live process environment so the change takes effect
+    # immediately without requiring a container restart.
+    os.environ[var] = value
+
+
+def _is_key_configured(var: str) -> bool:
+    """Return True if the env var is set to a non-placeholder, non-empty value."""
+    val = (os.environ.get(var) or "").strip()
+    return bool(val) and val != _PLACEHOLDER
+
+
+@app.get("/admin/provider-keys")
+async def admin_get_provider_keys(x_admin_key: str = Header(None)):
+    """Return configured status for each provider key.
+
+    NEVER returns key values — only True/False per variable.
+    """
+    _require_admin(x_admin_key)
+    result: dict[str, dict] = {}
+    for provider, cfg in _PROVIDER_KEY_MAP.items():
+        key_var = cfg["key_var"]
+        entry: dict = {"key_var": key_var, "configured": _is_key_configured(key_var)}
+        extra = cfg.get("extra", {})
+        if extra:
+            entry["extra"] = {
+                var: {"label": label, "configured": _is_key_configured(var)}
+                for var, label in extra.items()
+            }
+        result[provider] = entry
+    return result
+
+
+class ProviderKeyUpdate(BaseModel):
+    provider: str
+    key_value: str                    # the new API key — never stored in DB
+    extra_values: Optional[Dict[str, str]] = None  # e.g. {"BSC_API_BASE_URL": "..."}
+
+
+@app.post("/admin/provider-keys")
+async def admin_set_provider_key(
+    body: ProviderKeyUpdate,
+    x_admin_key: str = Header(None),
+):
+    """Write a provider API key to the .env file and reload into os.environ.
+
+    The key value is written to disk only. It is never stored in the DB,
+    never logged, and never returned in any response.
+    """
+    _require_admin(x_admin_key)
+
+    if body.provider not in _PROVIDER_KEY_MAP:
+        raise HTTPException(status_code=422, detail=f"Unknown provider: {body.provider}")
+
+    cfg = _PROVIDER_KEY_MAP[body.provider]
+    key_var = cfg["key_var"]
+
+    if not body.key_value.strip():
+        raise HTTPException(status_code=422, detail="key_value must not be empty")
+
+    _write_env_var(key_var, body.key_value.strip())
+
+    # Handle optional extra vars (e.g. BSC endpoint URL)
+    if body.extra_values:
+        allowed_extra = cfg.get("extra", {})
+        for var, val in body.extra_values.items():
+            if var not in allowed_extra:
+                raise HTTPException(status_code=422, detail=f"Unknown extra var: {var}")
+            _write_env_var(var, val.strip())
+
+    return {"status": "ok", "provider": body.provider}
+
+
 @app.get("/admin/meta")
 async def admin_get_meta(x_admin_key: str = Header(None)):
     """Return platform metadata for the admin wizard (available features, LLM providers)."""
@@ -713,7 +854,7 @@ async def admin_test_llm(body: TestLLMRequest, x_admin_key: str = Header(None)):
         "max_tokens": body.max_tokens,
     }
     if provider == "bsc":
-        bsc_model_version = (body.bsc_model_version or "v2").lower()
+        bsc_model_version = (body.bsc_model_version or "v1").lower()
         if bsc_model_version not in {"v1", "v2"}:
             raise HTTPException(status_code=422, detail="bsc_model_version must be 'v1' or 'v2'")
         call_params["bsc_model_version"] = bsc_model_version

@@ -70,6 +70,7 @@ def build_performer_user_prompt(
     recent_messages: Optional[List[Message]] = None,
     chatroom_context: str = "",
     template: Optional[str] = None,
+    participant_name: Optional[str] = None,
 ) -> str:
     """Build the Performer user prompt from the Director's output."""
     objective = instruction.get("objective", "")
@@ -82,6 +83,8 @@ def build_performer_user_prompt(
     target_str = _format_target_message(target_message)
     target_user_str = target_user or ""
     performer_action = _resolve_performer_action_type(action_type, target_user)
+    # Include participant name so the LLM can infer gender for grammatical agreement.
+    participant_section = f"\n\nNote: the human participant's name is **{participant_name}** — use this to infer their gender when referring to them." if participant_name else ""
 
     raw = template if (isinstance(template, str) and template.strip()) else _RAW_UNIFIED_TEMPLATE
     prompt = _render_prompt(raw, "user")
@@ -95,5 +98,6 @@ def build_performer_user_prompt(
     prompt = prompt.replace("{DIRECTIVE}", directive)
     prompt = prompt.replace("{TARGET_USER}", target_user_str)
     prompt = prompt.replace("{TARGET_MESSAGE}", target_str)
+    prompt = prompt.replace("{PARTICIPANT_NAME_SECTION}", participant_section)
 
     return prompt

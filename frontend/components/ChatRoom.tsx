@@ -36,6 +36,7 @@ interface ChatRoomProps {
   newsArticle: Message | null
   newsArticleModalOpen: boolean
   dismissNewsArticle: () => void
+  openNewsArticle: () => void
   participantStance: ParticipantStance | null
   onConfirmParticipantStance: (stance: ParticipantStance) => Promise<void>
 }
@@ -61,6 +62,7 @@ export default function ChatRoom({
   newsArticle,
   newsArticleModalOpen,
   dismissNewsArticle,
+  openNewsArticle,
   participantStance,
   onConfirmParticipantStance,
 }: ChatRoomProps) {
@@ -82,6 +84,7 @@ export default function ChatRoom({
           setReportTarget(msg)
           setReportModalOpen(true)
         }}
+        onArticleClick={newsArticle ? openNewsArticle : undefined}
       />
 
       <InputBar

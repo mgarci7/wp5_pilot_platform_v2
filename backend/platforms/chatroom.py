@@ -647,7 +647,14 @@ class SimulationSession:
                             self._next_pipeline_id = (self._next_pipeline_id % self._parallel_turns) + 1
                             pid = self._next_pipeline_id
                             allowed = self._pipeline_agents[pid - 1]  # 0-indexed
-                            task = asyncio.create_task(self._parallel_turn(pid, allowed))
+                            # Stagger pipeline starts so messages from concurrent pipelines
+                            # don't all arrive at once.  Each pipeline slot gets an
+                            # independent random offset within its own window so they
+                            # interleave naturally rather than firing in a fixed order.
+                            stagger_delay = self._rng.uniform(0.0, (pid - 1) * 3.0)
+                            task = asyncio.create_task(
+                                self._parallel_turn(pid, allowed, stagger_delay=stagger_delay)
+                            )
                             self._active_turn_tasks.add(task)
                             task.add_done_callback(self._active_turn_tasks.discard)
                     else:
@@ -700,7 +707,7 @@ class SimulationSession:
             finally:
                 await self._publish_typing(started=False)
 
-    async def _parallel_turn(self, pid: int, allowed_agents: List[str]) -> None:
+    async def _parallel_turn(self, pid: int, allowed_agents: List[str], stagger_delay: float = 0.0) -> None:
         """Execute a single agent turn in parallel-friendly mode.
 
         LLM pipeline calls run WITHOUT the turn lock so multiple pipelines
@@ -712,10 +719,19 @@ class SimulationSession:
 
         ``allowed_agents`` restricts which agents this pipeline's Director
         can select, preventing duplicate agent picks across pipelines.
+
+        ``stagger_delay`` is an initial sleep applied before the LLM call so
+        concurrent pipelines don't all fire at the same instant — this makes
+        messages from different pipelines arrive at naturally staggered times
+        rather than in sudden batches.
         """
         from utils.logger import pipeline_id_var
         pipeline_id_var.set(pid)
         try:
+            # Stagger: wait before starting so pipelines interleave naturally.
+            if stagger_delay > 0:
+                await asyncio.sleep(stagger_delay)
+
             await self._publish_typing(started=True)
             # LLM pipeline runs concurrently with other parallel tasks.
             result = await self.agent_manager.orchestrator.execute_turn(

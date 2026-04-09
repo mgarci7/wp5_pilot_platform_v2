@@ -160,6 +160,10 @@ export function useChat() {
     setNewsArticleModalOpen(false)
   }, [sessionId])
 
+  const openNewsArticle = useCallback(() => {
+    setNewsArticleModalOpen(true)
+  }, [])
+
   // Send message
   const sendMessage = () => {
     if (!inputValue.trim()) return
@@ -353,6 +357,7 @@ export function useChat() {
     newsArticle,
     newsArticleModalOpen,
     dismissNewsArticle,
+    openNewsArticle,
     submitParticipantStance,
     // Blocked
     blockedSenders,

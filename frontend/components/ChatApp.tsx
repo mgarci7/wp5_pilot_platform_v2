@@ -43,6 +43,7 @@ export default function ChatApp() {
       newsArticle={chat.newsArticle}
       newsArticleModalOpen={chat.newsArticleModalOpen}
       dismissNewsArticle={chat.dismissNewsArticle}
+      openNewsArticle={chat.openNewsArticle}
       participantStance={chat.participantStance}
       onConfirmParticipantStance={chat.submitParticipantStance}
     />

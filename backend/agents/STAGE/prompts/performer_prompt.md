@@ -9,14 +9,14 @@ Your character persona (if defined) and participation history will be provided i
 {/SYSTEM}
 
 {#USER}
-{AGENT_PERSONA_SECTION}
-## How the Director Sees You So Far:
+{AGENT_PERSONA_SECTION}## How the Director Sees You So Far:
 
 {AGENT_PROFILE}
 
 ## Your Most Recent Messages:
 
 {RECENT_MESSAGES}
+{PARTICIPANT_NAME_SECTION}
 {/USER}
 
 ## What you Want to Achieve With Your Message:

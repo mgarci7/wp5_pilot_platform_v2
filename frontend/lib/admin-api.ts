@@ -1,7 +1,7 @@
 /* Admin API client — all requests include X-Admin-Key header. */
 
 import { API_BASE } from "./constants"
-import type { AdminMeta, SessionSummary, SimulationConfig, ExperimentalConfig, TokenConfig, TokenGroupStats, TestLLMResult, ComplianceStats } from "./admin-types"
+import type { AdminMeta, SessionSummary, SimulationConfig, ExperimentalConfig, TokenConfig, TokenGroupStats, TestLLMResult, ComplianceStats, ProviderKeyStatus } from "./admin-types"
 
 async function adminFetch(
   path: string,
@@ -31,6 +31,28 @@ export async function getMeta(key: string): Promise<AdminMeta> {
   const res = await adminFetch("/admin/meta", key)
   if (!res.ok) throw new Error("Failed to load platform metadata")
   return res.json()
+}
+
+export async function getProviderKeys(key: string): Promise<Record<string, ProviderKeyStatus>> {
+  const res = await adminFetch("/admin/provider-keys", key)
+  if (!res.ok) throw new Error("Failed to load provider key status")
+  return res.json()
+}
+
+export async function setProviderKey(
+  key: string,
+  provider: string,
+  keyValue: string,
+  extraValues?: Record<string, string>,
+): Promise<void> {
+  const res = await adminFetch("/admin/provider-keys", key, {
+    method: "POST",
+    body: JSON.stringify({ provider, key_value: keyValue, extra_values: extraValues ?? null }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Failed to save key" }))
+    throw new Error(err.detail || "Failed to save key")
+  }
 }
 
 export async function testLlm(

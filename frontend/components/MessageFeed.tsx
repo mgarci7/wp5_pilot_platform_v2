@@ -16,6 +16,7 @@ interface MessageFeedProps {
   onLike: (msg: Message) => void
   onMention: (sender: string) => void
   onReport: (msg: Message) => void
+  onArticleClick?: (msg: Message) => void
 }
 
 function TypingDots() {
@@ -62,6 +63,7 @@ export default function MessageFeed({
   onLike,
   onMention,
   onReport,
+  onArticleClick,
 }: MessageFeedProps) {
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -82,7 +84,11 @@ export default function MessageFeed({
 
             if (msg.msg_type === "news_article") {
               return (
-                <NewsArticleCard key={msg.message_id} message={msg} />
+                <NewsArticleCard
+                  key={msg.message_id}
+                  message={msg}
+                  onClick={onArticleClick ? () => onArticleClick(msg) : undefined}
+                />
               )
             }
 

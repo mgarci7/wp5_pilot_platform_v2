@@ -3,12 +3,19 @@ import { formatMessageTime } from "@/lib/dates"
 
 interface NewsArticleCardProps {
   message: Message
+  onClick?: () => void
 }
 
-export default function NewsArticleCard({ message }: NewsArticleCardProps) {
+export default function NewsArticleCard({ message, onClick }: NewsArticleCardProps) {
   return (
     <div className="flex justify-center my-2 px-4">
-      <div className="bg-bg-surface rounded-lg shadow-sm overflow-hidden border border-border max-w-[85%] w-full">
+      <div
+        className={`bg-bg-surface rounded-lg shadow-sm overflow-hidden border border-border max-w-[85%] w-full${onClick ? " cursor-pointer hover:border-accent hover:shadow-md transition-shadow" : ""}`}
+        onClick={onClick}
+        role={onClick ? "button" : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick() } : undefined}
+      >
         <div className="h-1 bg-accent" />
         <div className="p-3.5">
           {message.source && (
@@ -26,9 +33,16 @@ export default function NewsArticleCard({ message }: NewsArticleCardProps) {
               {message.body}
             </p>
           )}
-          <p className="text-[11px] text-secondary mt-2 text-right">
-            {formatMessageTime(message.timestamp)}
-          </p>
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-[11px] text-secondary">
+              {formatMessageTime(message.timestamp)}
+            </p>
+            {onClick && (
+              <p className="text-[11px] text-accent font-medium">
+                Leer artículo completo →
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>

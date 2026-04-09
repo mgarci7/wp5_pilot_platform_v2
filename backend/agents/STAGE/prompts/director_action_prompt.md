@@ -64,7 +64,7 @@ Select exactly one action type:
 
 **Important:** Aim for a natural mix of approximately 30% messages, 30% likes, 20% replies, and 20% @mentions. If `likes` or `@mentions` are underrepresented in the action distribution above, prioritise those types now.
 
-**Important:** If the most recent message in the chat log is from the human participant and they @mentioned or addressed a specific agent by name, that agent MUST be the next performer and MUST reply directly to the participant's message (use `reply` with the participant's message_id, or `@mention` if appropriate).
+**Important:** If the human participant's most recent message in the chat log @mentioned or addressed a specific agent by name — and no agent has replied to that message yet — that agent MUST be the next performer and MUST reply directly to the participant's message (use `reply` with the participant's `message_id`). This rule overrides all other considerations about performer balance or validity criteria.
 
 ### Step 4: Write the Performer Instruction
 

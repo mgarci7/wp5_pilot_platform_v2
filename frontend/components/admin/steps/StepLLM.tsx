@@ -130,7 +130,7 @@ function LLMRoleConfig({
         temperature: temperature || undefined,
         top_p: topP || undefined,
         max_tokens: maxTokens,
-        bsc_model_version: provider === "bsc" ? (config.bsc_model_version ?? "v2") : undefined,
+        bsc_model_version: provider === "bsc" ? (config.bsc_model_version ?? "v1") : undefined,
       })
       setTestResult(result)
       onTestResult?.(role, result.ok)
@@ -505,7 +505,7 @@ export default function StepLLM({ config, onChange, llmProviders, providerModels
       <div className="bg-admin-surface rounded-lg border border-admin-border p-5">
         <div className="mb-3">
           <span className="text-sm font-semibold text-admin-text">BSC Model Version</span>
-          <span className="text-xs text-admin-faint ml-2">BSC v2 is the fine-tuned version used for these experiments.</span>
+          <span className="text-xs text-admin-faint ml-2">BSC v1 (Gemma 4 30B) is the recommended version for these experiments.</span>
         </div>
 
         <div className="space-y-3">
@@ -513,12 +513,12 @@ export default function StepLLM({ config, onChange, llmProviders, providerModels
             <button
               onClick={() => onChange({ bsc_model_version: "v1" })}
               className={`px-4 py-3 rounded-lg border transition-colors text-left ${
-                (config.bsc_model_version ?? "v2") === "v1"
+                (config.bsc_model_version ?? "v1") === "v1"
                   ? "border-admin-accent bg-admin-accent/10 text-admin-text"
                   : "border-admin-border hover:border-admin-accent/50 text-admin-muted"
               }`}
             >
-              <div className="font-medium text-sm">BSC v1</div>
+              <div className="font-medium text-sm">BSC v1 · Gemma 4 30B (recommended)</div>
               <div className="text-xs mt-1 opacity-75">
                 r=16, α=32 · English prompts · 130k samples
               </div>
@@ -527,12 +527,12 @@ export default function StepLLM({ config, onChange, llmProviders, providerModels
             <button
               onClick={() => onChange({ bsc_model_version: "v2" })}
               className={`px-4 py-3 rounded-lg border transition-colors text-left ${
-                (config.bsc_model_version ?? "v2") === "v2"
+                (config.bsc_model_version ?? "v1") === "v2"
                   ? "border-admin-accent bg-admin-accent/10 text-admin-text"
                   : "border-admin-border hover:border-admin-accent/50 text-admin-muted"
               }`}
             >
-              <div className="font-medium text-sm">BSC v2 (fine-tuned, recommended)</div>
+              <div className="font-medium text-sm">BSC v2 (fine-tuned)</div>
               <div className="text-xs mt-1 opacity-75">
                 r=64, α=128 · Spanish prompts · 88k balanced
               </div>

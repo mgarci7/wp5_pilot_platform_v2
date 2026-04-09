@@ -4,6 +4,98 @@ import { useEffect, useState } from "react"
 import type { SimulationConfig } from "../../../lib/admin-types"
 import { normalizeAgentNames } from "../../../lib/agent-name-options"
 
+function AgentModeHelpModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4 py-6 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="w-full max-w-2xl rounded-2xl border border-admin-border bg-admin-surface shadow-2xl overflow-hidden">
+        <div className="h-1 bg-admin-accent" />
+        <div className="p-6 space-y-5">
+          <div className="flex items-start justify-between gap-4">
+            <h2 className="text-lg font-semibold text-admin-text">Agent Mode — How it works</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="shrink-0 rounded-full border border-admin-border px-3 py-1 text-xs font-medium text-admin-muted hover:text-admin-text hover:border-admin-accent transition-colors"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="space-y-5 text-sm text-admin-text">
+
+            {/* Prompt-based */}
+            <div className="rounded-xl border border-admin-border bg-admin-surface-alt p-4 space-y-2">
+              <div className="font-semibold text-admin-text">Prompt-based mode</div>
+              <p className="text-admin-muted leading-relaxed">
+                You define a fixed set of agents (names + optional personas) that is shared across all treatment groups.
+                The Director LLM is responsible for shaping each agent&apos;s stance and incivility turn-by-turn through
+                its validity criteria instructions — there are no pre-set trait labels on the agents themselves.
+              </p>
+              <div className="mt-2">
+                <div className="text-xs font-semibold text-admin-muted uppercase tracking-wider mb-1">Workflow</div>
+                <ol className="list-decimal list-inside space-y-1 text-admin-muted text-xs">
+                  <li>Create agents in the <strong>Session</strong> step (names, optional personas).</li>
+                  <li>Set validity criteria per treatment in the <strong>Treatments</strong> step — these tell the Director what tone and stance the conversation should have.</li>
+                  <li>At runtime, the Director reads the criteria each turn and picks the best agent action to satisfy them. It adjusts dynamically as the conversation evolves.</li>
+                </ol>
+              </div>
+              <p className="text-xs text-admin-muted mt-1">
+                <strong>Best for:</strong> exploratory experiments, small agent sets, or when you want the LLM to handle all stance/incivility management through prompting.
+              </p>
+            </div>
+
+            {/* Pool-based */}
+            <div className="rounded-xl border border-admin-border bg-admin-surface-alt p-4 space-y-2">
+              <div className="font-semibold text-admin-text">Agent pool mode</div>
+              <p className="text-admin-muted leading-relaxed">
+                You pre-define a bank of agents with fixed trait labels (<em>stance</em>, <em>incivility</em>, <em>ideology</em>).
+                Each treatment selects a candidate subset from the pool. At session start, the backend picks the final
+                live lineup based on the participant&apos;s self-report and the treatment&apos;s quota targets
+                (<code>LIKEMINDED_TARGET</code> / <code>INCIVILITY_TARGET</code>).
+              </p>
+              <div className="mt-2">
+                <div className="text-xs font-semibold text-admin-muted uppercase tracking-wider mb-1">Workflow</div>
+                <ol className="list-decimal list-inside space-y-1 text-admin-muted text-xs">
+                  <li>Build the agent pool in the <strong>Treatments</strong> step — assign each agent a stance, incivility level, and persona.</li>
+                  <li>Per treatment, pick the candidate agent IDs (<em>pool_agent_ids</em>) the backend may draw from.</li>
+                  <li>Set <code>LIKEMINDED_TARGET</code> and <code>INCIVILITY_TARGET</code> percentages in the validity criteria.</li>
+                  <li>When a participant joins, the backend reads their self-report (favor / against / skeptical) and selects the agents that best satisfy the treatment quotas.</li>
+                  <li>The Director still orchestrates turn-by-turn, but the agents&apos; trait labels are fixed — no prompting is needed to enforce stance or incivility.</li>
+                </ol>
+              </div>
+              <p className="text-xs text-admin-muted mt-1">
+                <strong>Best for:</strong> factorial designs where you need precise control over like-mindedness and incivility exposure across conditions (e.g., a 3×3 incivility × like-mindedness experiment).
+              </p>
+            </div>
+
+            {/* Shared pipeline */}
+            <div className="rounded-xl border border-admin-border bg-admin-surface-alt p-4 space-y-2">
+              <div className="font-semibold text-admin-text">Shared pipeline (both modes)</div>
+              <p className="text-admin-muted leading-relaxed text-xs">
+                Regardless of mode, every agent turn runs the same <strong>Director → Performer → Moderator</strong> pipeline:
+              </p>
+              <ol className="list-decimal list-inside space-y-1 text-admin-muted text-xs">
+                <li><strong>Director Update</strong> — revises the last agent&apos;s profile based on what they just said.</li>
+                <li><strong>Director Evaluate</strong> — scores the recent conversation against internal and ecological validity criteria.</li>
+                <li><strong>Director Action</strong> — chooses which agent acts next and what instruction to give them.</li>
+                <li><strong>Performer</strong> — generates the actual message following the instruction.</li>
+                <li><strong>Moderator</strong> — extracts the clean message content and removes any meta-commentary.</li>
+                <li><strong>Classifier</strong> — labels the message (stance, incivility) for research logging.</li>
+              </ol>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface StepSessionProps {
   config: SimulationConfig
   onChange: (updates: Partial<SimulationConfig>) => void
@@ -29,6 +121,7 @@ const EXAMPLE_PERSONAS = [
 
 export default function StepSession({ config, onChange, touched }: StepSessionProps) {
   const [showPersonas, setShowPersonas] = useState(false)
+  const [showAgentModeHelp, setShowAgentModeHelp] = useState(false)
 
   useEffect(() => {
     if ((config.agent_personas || []).some((persona) => persona.trim().length > 0)) {
@@ -74,6 +167,8 @@ export default function StepSession({ config, onChange, touched }: StepSessionPr
 
   return (
     <div className="space-y-6">
+      {showAgentModeHelp && <AgentModeHelpModal onClose={() => setShowAgentModeHelp(false)} />}
+
       <div>
         <h2 className="text-lg font-semibold text-admin-text">Session & Agents</h2>
         <p className="text-sm text-admin-muted mt-1">
@@ -83,7 +178,17 @@ export default function StepSession({ config, onChange, touched }: StepSessionPr
 
       {/* Agent mode toggle */}
       <div className="bg-admin-surface rounded-lg border border-admin-border p-5 space-y-3">
-        <h3 className="text-sm font-semibold text-admin-muted uppercase tracking-wider">Agent Mode</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-admin-muted uppercase tracking-wider">Agent Mode</h3>
+          <button
+            type="button"
+            onClick={() => setShowAgentModeHelp(true)}
+            className="flex items-center justify-center w-4 h-4 rounded-full border border-admin-muted text-admin-muted hover:border-admin-accent hover:text-admin-accent transition-colors text-[10px] font-bold leading-none flex-shrink-0"
+            title="How does Agent Mode work?"
+          >
+            ?
+          </button>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <button
             onClick={() => onChange({ agent_mode: "prompt" })}

@@ -1,5 +1,11 @@
 /* TypeScript interfaces for admin config shapes. */
 
+export interface ProviderKeyStatus {
+  key_var: string
+  configured: boolean
+  extra?: Record<string, { label: string; configured: boolean }>
+}
+
 export interface SimulationConfig {
   random_seed: number
   session_duration_minutes: number

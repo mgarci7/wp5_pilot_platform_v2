@@ -410,44 +410,55 @@ class Orchestrator:
         performer_rationale = action_data.get("performer_rationale")
         action_rationale = action_data.get("action_rationale")
 
-        # 3a. If the most recent message is from the human participant and they
-        #     @mentioned or addressed a specific agent, force that agent to reply.
-        if recent_action and recent_action[-1].sender == self.state.user_name:
-            last_human_msg = recent_action[-1]
-            addressed_agent = None
-            agent_names = {a.name for a in agents if a.name != self.state.user_name}
+        # 3a. If the participant's most recent message in the window @mentions or
+        #     addresses a specific agent that has NOT yet replied to it, force
+        #     that agent to reply.  We scan backwards through the window to find
+        #     the latest participant message, then check whether any agent has
+        #     already responded after it — if so, the obligation is discharged.
+        addressed_agent = None
+        pending_human_msg = None
+        agent_names = {a.name for a in agents if a.name != self.state.user_name}
 
+        for msg in reversed(recent_action):
+            if msg.sender == self.state.user_name:
+                pending_human_msg = msg
+                break
+            # An agent replied after the participant's message — obligation discharged.
+            if msg.sender in agent_names:
+                break
+
+        if pending_human_msg:
             # Check explicit @mentions first
-            if last_human_msg.mentions:
-                for m in last_human_msg.mentions:
+            if pending_human_msg.mentions:
+                for m in pending_human_msg.mentions:
                     if m in agent_names:
                         addressed_agent = m
                         break
 
-            # Fallback: check if message starts with or contains an agent name
+            # Fallback: message starts with or contains @agentname
             if addressed_agent is None:
-                content_lower = (last_human_msg.content or "").lower()
+                content_lower = (pending_human_msg.content or "").lower()
                 for name in agent_names:
                     if content_lower.startswith(name.lower()) or f"@{name.lower()}" in content_lower:
                         addressed_agent = name
                         break
 
-            if addressed_agent and addressed_agent != agent_name:
-                self.logger.log_error(
-                    "director_override_participant_mention",
-                    f"Participant addressed '{addressed_agent}'; overriding Director choice '{agent_name}'",
-                )
-                agent_name = addressed_agent
-                action_data["next_performer"] = self._name_map.get(addressed_agent, addressed_agent)
+        if addressed_agent and addressed_agent != agent_name:
+            self.logger.log_error(
+                "director_override_participant_mention",
+                f"Participant addressed '{addressed_agent}'; overriding Director choice '{agent_name}'",
+            )
+            agent_name = addressed_agent
+            action_data["next_performer"] = self._name_map.get(addressed_agent, addressed_agent)
 
-            if addressed_agent:
-                # Force a reply to the participant's message
-                action_type = "reply"
-                action_data["action_type"] = "reply"
-                target_message_id = last_human_msg.message_id
-                action_data["target_message_id"] = target_message_id
-                target_user = None
-                action_data["target_user"] = None
+        if addressed_agent:
+            # Force a reply to the participant's message
+            action_type = "reply"
+            action_data["action_type"] = "reply"
+            target_message_id = pending_human_msg.message_id
+            action_data["target_message_id"] = target_message_id
+            target_user = None
+            action_data["target_user"] = None
 
         # 3b. Fix self-mention: if Director told an agent to @mention itself,
         #     downgrade to a regular message (no target_user).
@@ -601,6 +612,7 @@ class Orchestrator:
                 incivility_framework=self.incivility_framework,
             ),
             template=self.performer_prompt_template,
+            participant_name=self.state.user_name,
         )
 
         content = None

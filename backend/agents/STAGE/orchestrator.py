@@ -14,6 +14,7 @@ Each turn:
 Agent profiles accumulate over the session, updated by the Update call.
 All names are anonymized before LLM calls and deanonymized in the output.
 """
+import asyncio
 import random
 import re
 from copy import copy
@@ -941,28 +942,51 @@ class Orchestrator:
             template=self.director_action_prompt_template,
         )
 
-        action_raw = None
-        try:
-            action_raw = await self.director_llm.generate_response(
-                action_user, max_retries=1,
-                system_prompt=self._action_system_prompt,
+        # Retry loop: Director Action is the most critical call in the pipeline.
+        # On empty response or unparseable JSON, retry with short exponential backoff
+        # before giving up — this handles cold-start timeouts and transient API errors
+        # that are especially common at session start.
+        MAX_ACTION_ATTEMPTS = 3
+        BACKOFF_SECONDS = [0, 2, 5]  # delay before attempt 1, 2, 3
+
+        for attempt in range(MAX_ACTION_ATTEMPTS):
+            if BACKOFF_SECONDS[attempt] > 0:
+                await asyncio.sleep(BACKOFF_SECONDS[attempt])
+
+            action_raw = None
+            try:
+                action_raw = await self.director_llm.generate_response(
+                    action_user, max_retries=1,
+                    system_prompt=self._action_system_prompt,
+                )
+            except Exception as e:
+                self.logger.log_error(
+                    "director_action_llm_call",
+                    f"attempt {attempt + 1}/{MAX_ACTION_ATTEMPTS}: {e}",
+                )
+                continue
+
+            self.logger.log_llm_call(
+                agent_name="__director_action__",
+                prompt=f"[SYSTEM]\n{self._action_system_prompt}\n\n[USER]\n{action_user}",
+                response=action_raw,
+                error=None if action_raw else f"Director Action LLM returned no response (attempt {attempt + 1}/{MAX_ACTION_ATTEMPTS})",
             )
-        except Exception as e:
-            self.logger.log_error("director_action_llm_call", str(e))
-            return None
 
-        self.logger.log_llm_call(
-            agent_name="__director_action__",
-            prompt=f"[SYSTEM]\n{self._action_system_prompt}\n\n[USER]\n{action_user}",
-            response=action_raw,
-            error=None if action_raw else "Director Action LLM returned no response",
+            if not action_raw:
+                continue
+
+            try:
+                return parse_action_response(action_raw)
+            except ValueError as e:
+                self.logger.log_error(
+                    "director_action_parse",
+                    f"attempt {attempt + 1}/{MAX_ACTION_ATTEMPTS}: {e}",
+                )
+                continue
+
+        self.logger.log_error(
+            "director_action_failed",
+            f"Director Action gave no valid response after {MAX_ACTION_ATTEMPTS} attempts — skipping turn",
         )
-
-        if not action_raw:
-            return None
-
-        try:
-            return parse_action_response(action_raw)
-        except ValueError as e:
-            self.logger.log_error("director_action_parse", str(e))
-            return None
+        return None

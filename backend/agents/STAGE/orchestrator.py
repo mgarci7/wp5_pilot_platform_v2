@@ -254,10 +254,10 @@ class Orchestrator:
         self._update_system_prompt = build_update_system_prompt(
             chatroom_context=prompt_context,
         )
-        self._performer_system_prompt = build_performer_system_prompt(
-            chatroom_context=prompt_context,
-            template=self.performer_prompt_template,
-        )
+        # Performer system prompt is per-agent (each agent has their own name).
+        # Cached lazily on first use per agent name.
+        self._performer_system_prompts: Dict[str, str] = {}
+        self._performer_prompt_context = prompt_context
         self._moderator_system_prompt = build_moderator_system_prompt(
             chatroom_context=prompt_context,
             template=self.moderator_prompt_template,
@@ -618,10 +618,20 @@ class Orchestrator:
                 incivility_framework=self.incivility_framework,
             ),
             template=self.performer_prompt_template,
-            participant_name=self.state.user_name,
         )
 
         content = None
+
+        # Build (or retrieve cached) per-agent performer system prompt.
+        anon_agent_label = self._name_map.get(agent_name, agent_name)
+        if anon_agent_label not in self._performer_system_prompts:
+            self._performer_system_prompts[anon_agent_label] = build_performer_system_prompt(
+                chatroom_context=self._performer_prompt_context,
+                agent_name=anon_agent_label,
+                participant_name=self.state.user_name,
+                template=self.performer_prompt_template,
+            )
+        performer_system_prompt = self._performer_system_prompts[anon_agent_label]
 
         for attempt in range(1, MAX_PERFORMER_RETRIES + 1):
             # 5a. Call the Performer
@@ -629,14 +639,14 @@ class Orchestrator:
             try:
                 performer_raw = await self.performer_llm.generate_response(
                     performer_user_prompt, max_retries=1,
-                    system_prompt=self._performer_system_prompt,
+                    system_prompt=performer_system_prompt,
                 )
             except Exception as e:
                 self.logger.log_error("performer_llm_call", str(e))
 
             self.logger.log_llm_call(
                 agent_name=agent_name,
-                prompt=f"[SYSTEM]\n{self._performer_system_prompt}\n\n[USER]\n{performer_user_prompt}",
+                prompt=f"[SYSTEM]\n{performer_system_prompt}\n\n[USER]\n{performer_user_prompt}",
                 response=performer_raw,
                 error=None if performer_raw else f"Performer LLM returned no response (attempt {attempt}/{MAX_PERFORMER_RETRIES})",
             )

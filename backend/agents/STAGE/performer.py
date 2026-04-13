@@ -52,11 +52,22 @@ def _resolve_performer_action_type(action_type: str, target_user: Optional[str])
     return action_type
 
 
-def build_performer_system_prompt(chatroom_context: str = "", template: Optional[str] = None) -> str:
+def build_performer_system_prompt(
+    chatroom_context: str = "",
+    agent_name: str = "",
+    participant_name: Optional[str] = None,
+    template: Optional[str] = None,
+) -> str:
     """Build the Performer system prompt with session-static data only."""
     raw = template if (isinstance(template, str) and template.strip()) else _RAW_UNIFIED_TEMPLATE
     prompt = _render_prompt(raw, "system")
     prompt = prompt.replace("{CHATROOM_CONTEXT}", chatroom_context)
+    prompt = prompt.replace("{AGENT_NAME}", agent_name)
+    participant_section = (
+        f"The human participant's name is **{participant_name}** — use this to infer their gender when referring to them."
+        if participant_name else ""
+    )
+    prompt = prompt.replace("{PARTICIPANT_NAME_SECTION}", participant_section)
     return prompt
 
 
@@ -70,7 +81,6 @@ def build_performer_user_prompt(
     recent_messages: Optional[List[Message]] = None,
     chatroom_context: str = "",
     template: Optional[str] = None,
-    participant_name: Optional[str] = None,
 ) -> str:
     """Build the Performer user prompt from the Director's output."""
     objective = instruction.get("objective", "")
@@ -83,9 +93,6 @@ def build_performer_user_prompt(
     target_str = _format_target_message(target_message)
     target_user_str = target_user or ""
     performer_action = _resolve_performer_action_type(action_type, target_user)
-    # Include participant name so the LLM can infer gender for grammatical agreement.
-    participant_section = f"\n\nNote: the human participant's name is **{participant_name}** — use this to infer their gender when referring to them." if participant_name else ""
-
     raw = template if (isinstance(template, str) and template.strip()) else _RAW_UNIFIED_TEMPLATE
     prompt = _render_prompt(raw, "user")
     prompt = _render_action_type(prompt, performer_action)
@@ -98,6 +105,5 @@ def build_performer_user_prompt(
     prompt = prompt.replace("{DIRECTIVE}", directive)
     prompt = prompt.replace("{TARGET_USER}", target_user_str)
     prompt = prompt.replace("{TARGET_MESSAGE}", target_str)
-    prompt = prompt.replace("{PARTICIPANT_NAME_SECTION}", participant_section)
 
     return prompt

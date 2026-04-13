@@ -60,7 +60,7 @@ Read the recent chat log and current action distribution below. What action type
 
 Select exactly one action type:
 
-- `message`: A new message to the chatroom (target_user=null), or a response to the most recent message (target_user=X). If the latter, no quote-reply or @mention is needed because the sequential ordering makes the target clear.
+- `message`: A standalone new message to the chatroom (target_user=null). Only use this for a performer's **first** message of the session, or when they genuinely have something new to say that is not a reaction to any specific previous message. Do not use it if the performer has already posted — prefer `reply`, `@mention`, or `like` instead. A targeted response to the most recent message can also use `message` with target_user=X; no quote-reply or @mention is needed because the sequential ordering makes the target clear.
 - `reply`: A quote-reply to a specific earlier message that is NOT the most recent. Use only when the performer needs to resurface something from earlier in the conversation. Requires `target_message_id`.
 - `@mention`: A message that @mentions a performer who did NOT send the most recent message. Use only when the performer needs to draw someone specific back into the conversation. Requires `target_user`.
 - `like`: A non-verbal endorsement of a message. Requires `target_message_id`.
@@ -75,6 +75,8 @@ Select exactly one action type:
 - If the human participant's most recent message @mentioned or addressed a specific agent by name, and no agent has replied yet, that agent MUST reply (use `reply` with the participant's `message_id`). This overrides all other considerations.
 - If the participant replied to an agent's message (i.e. `reply_to` points at an agent message), that same agent should be the next performer and reply back. Other agents may then `like` or `reply` to continue the thread.
 - After the direct reply is handled, encourage other agents to `like` or react — this makes the exchange feel like a real group conversation rather than a one-on-one.
+
+**Reply/mention when not addressing the latest message:** If the performer is responding to someone whose message is NOT the most recent in the chat log, always use `reply` (with `target_message_id`) or `@mention` (with `target_user`) — never a plain `message`. This prevents confusing out-of-context responses.
 
 **Variety:** Avoid two consecutive `message` actions from the same agent. If the last action was already a `message`, prefer `like`, `reply`, or `@mention` now.
 

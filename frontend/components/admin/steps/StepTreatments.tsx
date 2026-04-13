@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import type { ExperimentalConfig, TreatmentGroup, SeedArticle, FeatureMeta, PoolAgent } from "../../../lib/admin-types"
+import type { ExperimentalConfig, TreatmentGroup, SeedArticle, FeatureMeta, PoolAgent, HumanizeRules } from "../../../lib/admin-types"
 import { createExperimental3x3Preset } from "../../../lib/treatment-presets"
 import { createSeedFromTemplate, getNewsTemplateById, NEWS_TEMPLATE_OPTIONS, type NewsTemplateId } from "../../../lib/news-story-options"
 import { DEFAULT_AGENT_POOL, autoSelectAgents, getAgentPoolPreset, parseTargetsFromCriteria } from "../../../lib/agent-pool-presets"
@@ -11,6 +11,9 @@ interface StepTreatmentsProps {
   onChange: (config: ExperimentalConfig) => void
   availableFeatures: FeatureMeta[]
   agentMode: "prompt" | "pool"
+  humanizeEnabled?: boolean
+  humanizePerAgent?: Record<string, HumanizeRules>
+  onHumanizePerAgentChange?: (perAgent: Record<string, HumanizeRules>) => void
 }
 
 const inputClass = "w-full px-3 py-2 border border-admin-border rounded-lg text-sm bg-admin-surface text-admin-text focus:outline-none focus:border-admin-accent focus:ring-1 focus:ring-admin-accent/30"
@@ -146,6 +149,66 @@ const IDEOLOGY_BADGE: Record<string, { label: string; cls: string }> = {
   right:  { label: "Right",  cls: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" },
 }
 
+const HUMANIZE_FIELDS: { key: keyof HumanizeRules; label: string; desc: string; def: number }[] = [
+  { key: "strip_hashtags",       label: "Strip hashtags",           desc: "Removes #hashtag tokens",                        def: 100 },
+  { key: "strip_inverted_punct", label: "Remove ¿ / ¡",             desc: "Drops Spanish inverted punctuation",              def: 100 },
+  { key: "word_subs",            label: "Word contractions",         desc: "que→q, xq→porque, tb→también, pa→para, x→por…",  def: 80  },
+  { key: "drop_accents",         label: "Drop accents",              desc: "Per-message chance to strip all accents",         def: 40  },
+  { key: "comma_spacing",        label: "Remove space after comma",  desc: "Per-comma chance: hola,como vs hola, como",      def: 50  },
+]
+
+const DEFAULT_HUMANIZE_RULES: HumanizeRules = {
+  strip_hashtags: 100,
+  strip_inverted_punct: 100,
+  word_subs: 80,
+  drop_accents: 40,
+  comma_spacing: 50,
+  max_emoji: 1,
+}
+
+function HumanizeRulesEditor({ rules, onChange }: { rules: HumanizeRules; onChange: (r: HumanizeRules) => void }) {
+  const set = (key: keyof HumanizeRules, value: number) => onChange({ ...rules, [key]: value })
+  return (
+    <div className="grid grid-cols-2 gap-x-6 gap-y-3 mt-2">
+      {HUMANIZE_FIELDS.map(({ key, label, desc, def }) => {
+        const val = rules[key] ?? def
+        return (
+          <div key={key}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs font-medium text-admin-text">{label}</p>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number" min={0} max={100} value={val}
+                  onChange={(e) => set(key, Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
+                  className="w-12 px-1.5 py-0.5 border border-admin-border rounded text-xs bg-admin-surface text-admin-text text-right focus:outline-none focus:border-admin-accent"
+                />
+                <span className="text-xs text-admin-faint">%</span>
+              </div>
+            </div>
+            <input
+              type="range" min={0} max={100} value={val}
+              onChange={(e) => set(key, parseInt(e.target.value))}
+              className="w-full h-1.5 accent-admin-accent"
+            />
+            <p className="text-xs text-admin-faint mt-0.5">{desc}</p>
+          </div>
+        )
+      })}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs font-medium text-admin-text">Max emoji</p>
+          <input
+            type="number" min={-1} max={10} value={rules.max_emoji ?? 1}
+            onChange={(e) => set("max_emoji", parseInt(e.target.value) ?? 1)}
+            className="w-12 px-1.5 py-0.5 border border-admin-border rounded text-xs bg-admin-surface text-admin-text text-right focus:outline-none focus:border-admin-accent"
+          />
+        </div>
+        <p className="text-xs text-admin-faint">-1 = unlimited · 0 = strip all</p>
+      </div>
+    </div>
+  )
+}
+
 const DEFAULT_POOL_STANCE: PoolAgent["stance"] = "agree"
 const DEFAULT_POOL_INCIVILITY: PoolAgent["incivility"] = "civil"
 
@@ -160,10 +223,16 @@ function AgentPoolEditor({
   pool,
   onChange,
   selectedTemplateId,
+  humanizeEnabled,
+  humanizePerAgent,
+  onHumanizePerAgentChange,
 }: {
   pool: PoolAgent[]
   onChange: (pool: PoolAgent[]) => void
   selectedTemplateId: string
+  humanizeEnabled?: boolean
+  humanizePerAgent?: Record<string, HumanizeRules>
+  onHumanizePerAgentChange?: (perAgent: Record<string, HumanizeRules>) => void
 }) {
   const addAgent = () => {
     const next: PoolAgent = {
@@ -303,6 +372,16 @@ function AgentPoolEditor({
                 placeholder="Describe the agent's personality, background, and communication style..."
               />
             </div>
+            {humanizeEnabled && onHumanizePerAgentChange && (
+              <div className="border-t border-admin-border pt-3">
+                <p className="text-xs font-medium text-admin-muted mb-1">Humanizer overrides</p>
+                <p className="text-xs text-admin-faint mb-2">Overrides the general humanizer settings for this agent only. 0–100%.</p>
+                <HumanizeRulesEditor
+                  rules={(humanizePerAgent ?? {})[agent.name] ?? { ...DEFAULT_HUMANIZE_RULES }}
+                  onChange={(r) => onHumanizePerAgentChange({ ...(humanizePerAgent ?? {}), [agent.name]: r })}
+                />
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -500,7 +579,7 @@ function GroupCard({
   )
 }
 
-export default function StepTreatments({ config, onChange, availableFeatures, agentMode }: StepTreatmentsProps) {
+export default function StepTreatments({ config, onChange, availableFeatures, agentMode, humanizeEnabled, humanizePerAgent, onHumanizePerAgentChange }: StepTreatmentsProps) {
   const [showBuilder, setShowBuilder] = useState(false)
   const [dimA, setDimA] = useState({ name: "", levels: ["", ""] })
   const [dimB, setDimB] = useState({ name: "", levels: ["", ""] })
@@ -762,7 +841,14 @@ export default function StepTreatments({ config, onChange, availableFeatures, ag
       </div>
 
       {agentMode === "pool" && (
-        <AgentPoolEditor pool={agentPool} onChange={updateAgentPool} selectedTemplateId={selectedNewsTemplate} />
+        <AgentPoolEditor
+          pool={agentPool}
+          onChange={updateAgentPool}
+          selectedTemplateId={selectedNewsTemplate}
+          humanizeEnabled={humanizeEnabled}
+          humanizePerAgent={humanizePerAgent}
+          onHumanizePerAgentChange={onHumanizePerAgentChange}
+        />
       )}
 
       {/* 2x2 builder */}

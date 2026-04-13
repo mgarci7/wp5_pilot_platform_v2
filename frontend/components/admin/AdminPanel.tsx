@@ -515,11 +515,6 @@ export default function AdminPanel() {
       providerParams={meta.provider_params ?? {}}
       adminKey={adminKey}
       onTestResult={handleLlmTestResult}
-      agentNames={
-        (simulation.agent_mode ?? "prompt") === "pool"
-          ? (experimental.agent_pool ?? []).map((a) => a.name)
-          : (simulation.agent_names ?? [])
-      }
     />,
     <StepTreatments
       key="treatments"
@@ -527,6 +522,9 @@ export default function AdminPanel() {
       onChange={setExperimental}
       availableFeatures={meta.available_features}
       agentMode={simulation.agent_mode ?? "prompt"}
+      humanizeEnabled={!!simulation.humanize_output}
+      humanizePerAgent={simulation.humanize_per_agent}
+      onHumanizePerAgentChange={(perAgent) => handleSimChange({ humanize_per_agent: perAgent })}
     />,
     <StepTokens
       key="tokens"

@@ -14,7 +14,6 @@ interface StepLLMProps {
   providerParams: Record<string, ProviderParamsMeta>
   adminKey: string
   onTestResult?: (role: Role, ok: boolean) => void
-  agentNames?: string[]
 }
 
 type Role = "director" | "performer" | "moderator" | "classifier"
@@ -426,7 +425,7 @@ function HumanizeRulesEditor({
   )
 }
 
-export default function StepLLM({ config, onChange, llmProviders, providerModels, providerParams, adminKey, onTestResult, agentNames = [] }: StepLLMProps) {
+export default function StepLLM({ config, onChange, llmProviders, providerModels, providerParams, adminKey, onTestResult }: StepLLMProps) {
   const [expanded, setExpanded] = useState<Role | null>("director")
   const [promptDefaults, setPromptDefaults] = useState<Record<string, string>>({})
   useEffect(() => {
@@ -513,93 +512,29 @@ export default function StepLLM({ config, onChange, llmProviders, providerModels
         </div>
 
         {config.humanize_output && (
-          <div className="px-5 pb-4 border-t border-admin-border pt-3 space-y-4">
-            {/* Mode selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-admin-muted">Mode:</span>
-              {(["general", "per_agent"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => onChange({ humanize_mode: mode })}
-                  className={`px-3 py-1 text-xs font-medium rounded-lg border transition-colors ${
-                    (config.humanize_mode ?? "general") === mode
-                      ? "bg-admin-accent text-white border-admin-accent"
-                      : "border-admin-border text-admin-muted hover:border-admin-accent/50"
-                  }`}
-                >
-                  {mode === "general" ? "General" : "Per agent"}
-                </button>
-              ))}
-              <span className="text-xs text-admin-faint ml-1">
-                {(config.humanize_mode ?? "general") === "general"
-                  ? "— same settings applied to all agents"
-                  : "— configure each agent independently"}
-              </span>
-            </div>
-
-            {(config.humanize_mode ?? "general") === "general" ? (
-              <>
-                <p className="text-xs text-admin-muted">Set the probability (0–100%) for each transformation. 0 = never, 100 = always.</p>
-                <HumanizeRulesEditor
-                  rules={{
-                    strip_hashtags:       config.humanize_strip_hashtags       ?? 100,
-                    strip_inverted_punct: config.humanize_strip_inverted_punct ?? 100,
-                    word_subs:            config.humanize_word_subs            ?? 80,
-                    drop_accents:         config.humanize_drop_accents         ?? 40,
-                    comma_spacing:        config.humanize_comma_spacing        ?? 50,
-                    max_emoji:            config.humanize_max_emoji            ?? 1,
-                  }}
-                  onChange={(r) => onChange({
-                    humanize_strip_hashtags:       r.strip_hashtags,
-                    humanize_strip_inverted_punct: r.strip_inverted_punct,
-                    humanize_word_subs:            r.word_subs,
-                    humanize_drop_accents:         r.drop_accents,
-                    humanize_comma_spacing:        r.comma_spacing,
-                    humanize_max_emoji:            r.max_emoji,
-                  })}
-                />
-              </>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-xs text-admin-muted">Configure humanizer settings per agent. General settings are disabled in this mode.</p>
-                {/* General settings — locked */}
-                <div className="rounded-lg border border-admin-border p-4 space-y-2">
-                  <p className="text-xs font-medium text-admin-muted uppercase tracking-wider">General (locked)</p>
-                  <HumanizeRulesEditor
-                    rules={{
-                      strip_hashtags:       config.humanize_strip_hashtags       ?? 100,
-                      strip_inverted_punct: config.humanize_strip_inverted_punct ?? 100,
-                      word_subs:            config.humanize_word_subs            ?? 80,
-                      drop_accents:         config.humanize_drop_accents         ?? 40,
-                      comma_spacing:        config.humanize_comma_spacing        ?? 50,
-                      max_emoji:            config.humanize_max_emoji            ?? 1,
-                    }}
-                    onChange={() => {}}
-                    disabled
-                  />
-                </div>
-                {/* Per-agent panels */}
-                {agentNames.length === 0 ? (
-                  <p className="text-xs text-admin-faint italic">No agents defined yet. Add agents in the Session or Treatments step first.</p>
-                ) : (
-                  agentNames.map((agentName) => {
-                    const perAgent = config.humanize_per_agent ?? {}
-                    const agentRules: HumanizeRules = perAgent[agentName] ?? { ...DEFAULT_HUMANIZE_RULES }
-                    return (
-                      <div key={agentName} className="rounded-lg border border-admin-border p-4 space-y-3">
-                        <p className="text-xs font-semibold text-admin-text">{agentName}</p>
-                        <HumanizeRulesEditor
-                          rules={agentRules}
-                          onChange={(r) => onChange({
-                            humanize_per_agent: { ...perAgent, [agentName]: r },
-                          })}
-                        />
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            )}
+          <div className="px-5 pb-4 border-t border-admin-border pt-3 space-y-3">
+            <p className="text-xs text-admin-muted">
+              Set the probability (0–100%) for each transformation. 0 = never, 100 = always.
+              In pool mode, per-agent overrides can be set in the Treatments step.
+            </p>
+            <HumanizeRulesEditor
+              rules={{
+                strip_hashtags:       config.humanize_strip_hashtags       ?? 100,
+                strip_inverted_punct: config.humanize_strip_inverted_punct ?? 100,
+                word_subs:            config.humanize_word_subs            ?? 80,
+                drop_accents:         config.humanize_drop_accents         ?? 40,
+                comma_spacing:        config.humanize_comma_spacing        ?? 50,
+                max_emoji:            config.humanize_max_emoji            ?? 1,
+              }}
+              onChange={(r) => onChange({
+                humanize_strip_hashtags:       r.strip_hashtags,
+                humanize_strip_inverted_punct: r.strip_inverted_punct,
+                humanize_word_subs:            r.word_subs,
+                humanize_drop_accents:         r.drop_accents,
+                humanize_comma_spacing:        r.comma_spacing,
+                humanize_max_emoji:            r.max_emoji,
+              })}
+            />
           </div>
         )}
       </div>

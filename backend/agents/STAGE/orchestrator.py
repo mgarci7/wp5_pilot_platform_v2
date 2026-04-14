@@ -633,6 +633,7 @@ class Orchestrator:
                 chatroom_context=self._performer_prompt_context,
                 agent_name=anon_agent_label,
                 participant_name=self.state.user_name,
+                agent_traits=self._agent_traits.get(agent_name) if self._agent_traits else None,
                 template=self.performer_prompt_template,
             )
         performer_system_prompt = self._performer_system_prompts[anon_agent_label]

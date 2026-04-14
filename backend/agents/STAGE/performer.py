@@ -56,6 +56,7 @@ def build_performer_system_prompt(
     chatroom_context: str = "",
     agent_name: str = "",
     participant_name: Optional[str] = None,
+    agent_traits: Optional[dict] = None,
     template: Optional[str] = None,
 ) -> str:
     """Build the Performer system prompt with session-static data only."""
@@ -68,6 +69,22 @@ def build_performer_system_prompt(
         if participant_name else ""
     )
     prompt = prompt.replace("{PARTICIPANT_NAME_SECTION}", participant_section)
+    # Inject fixed ideological traits so the performer never contradicts its core position.
+    if agent_traits:
+        traits_lines = []
+        if agent_traits.get("stance"):
+            traits_lines.append(f"- **Stance on the topic**: {agent_traits['stance']}")
+        if agent_traits.get("incivility"):
+            traits_lines.append(f"- **Incivility level**: {agent_traits['incivility']}")
+        if agent_traits.get("ideology"):
+            traits_lines.append(f"- **Ideology**: {agent_traits['ideology']}")
+        traits_block = (
+            "\n\n## Your Fixed Position (never contradicts this):\n\n" + "\n".join(traits_lines)
+            if traits_lines else ""
+        )
+    else:
+        traits_block = ""
+    prompt = prompt.replace("{AGENT_TRAITS_SECTION}", traits_block)
     return prompt
 
 

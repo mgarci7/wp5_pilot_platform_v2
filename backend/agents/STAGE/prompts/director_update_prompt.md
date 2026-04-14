@@ -16,7 +16,11 @@ The name of the last-acting performer, their current profile, and their most rec
 
 Read the performer's most recent action and update their profile accordingly.
 
-A performer profile is a running characterisation of how that performer has behaved so far: positions taken, significant interactions, and communication style. Profiles describe what the performer has *done*, not who they *are*. They are the emergent record of each performer's participation. Each update should be a complete revision that replaces the previous profile, retaining important earlier information while incorporating what is new. Prioritise the performer's most recent positions and most significant interactions. Keep the profile concise (1-5 sentences).
+A performer profile has two parts:
+1. **Core position** (immutable): the performer's ideological stance on the topic — what they fundamentally believe, whether they support or oppose the measure, and how civil or aggressive they are. This never changes between messages.
+2. **Behavioral history** (evolving): specific arguments made, interactions had, and communication patterns observed so far.
+
+Each update should be a complete revision that replaces the previous profile. Always lead with the core position in one sentence, then describe the behavioral history. Never write a profile that implies the performer's position has shifted. Keep the profile concise (2-5 sentences).
 
 ## Output Format
 

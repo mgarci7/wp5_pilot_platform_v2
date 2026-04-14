@@ -462,13 +462,19 @@ class Orchestrator:
             action_data["next_performer"] = self._name_map.get(addressed_agent, addressed_agent)
 
         if addressed_agent:
-            # Force a reply to the participant's message
+            # Force a reply to the participant's message and reset the instruction
+            # so the performer gets a coherent brief (original instruction was for a different agent/action).
             action_type = "reply"
             action_data["action_type"] = "reply"
             target_message_id = pending_human_msg.message_id
             action_data["target_message_id"] = target_message_id
             target_user = None
             action_data["target_user"] = None
+            action_data["performer_instruction"] = {
+                "objective": f"Reply directly to {self.state.user_name}'s message addressed to you.",
+                "motivation": f"{self.state.user_name} addressed you specifically — not replying would feel rude and unnatural.",
+                "directive": "Keep it conversational and on-topic; stay true to your fixed stance and character.",
+            }
 
         # 3b. Fix self-mention: if Director told an agent to @mention itself,
         #     downgrade to a regular message (no target_user).
@@ -480,6 +486,13 @@ class Orchestrator:
             action_type = "message"
             action_data["action_type"] = "message"
             target_user = None
+            # Clear the @mention instruction — the performer now posts a standalone message.
+            if action_data.get("performer_instruction"):
+                action_data["performer_instruction"] = {
+                    "objective": action_data["performer_instruction"].get("objective", "Post a message to the chatroom."),
+                    "motivation": action_data["performer_instruction"].get("motivation", ""),
+                    "directive": action_data["performer_instruction"].get("directive", "Stay true to your fixed stance and character."),
+                }
 
         # 3b. Handle 'wait' — Director selected the human participant.
         #     Skip Performer/Moderator and restore evaluate counter
@@ -801,10 +814,15 @@ class Orchestrator:
                 last_action = msg
                 break
 
+        # Resolve the last agent's fixed traits (keyed by real name, looked up via reverse map)
+        last_agent_real_name = self._reverse_map.get(self._last_agent, self._last_agent)
+        last_agent_traits = self._agent_traits.get(last_agent_real_name) if self._agent_traits else None
+
         update_user = build_update_user_prompt(
             last_action=last_action,
             last_agent=self._last_agent or "",
             last_agent_profile=last_agent_profile,
+            last_agent_traits=last_agent_traits,
             chatroom_context=_merge_prompt_context(
                 chatroom_context=self.chatroom_context,
                 incivility_framework=self.incivility_framework,

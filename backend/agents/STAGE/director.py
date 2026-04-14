@@ -188,15 +188,29 @@ def build_update_user_prompt(
     last_action: Optional[Message],
     last_agent: str = "",
     last_agent_profile: str = "",
+    last_agent_traits: Optional[dict] = None,
     chatroom_context: str = "",
 ) -> str:
     """Build the Director Update user prompt with dynamic data."""
     action_str = format_last_action(last_action)
     profile_str = last_agent_profile or "(This performer has not acted yet.)"
 
+    if last_agent_traits:
+        traits_parts = []
+        if last_agent_traits.get("stance"):
+            traits_parts.append(f"stance={last_agent_traits['stance']}")
+        if last_agent_traits.get("incivility"):
+            traits_parts.append(f"incivility={last_agent_traits['incivility']}")
+        if last_agent_traits.get("ideology"):
+            traits_parts.append(f"ideology={last_agent_traits['ideology']}")
+        traits_str = f"[Fixed traits: {', '.join(traits_parts)}]" if traits_parts else ""
+    else:
+        traits_str = ""
+
     prompt = _render_prompt(_UPDATE_TEMPLATE, "user")
     prompt = prompt.replace("{CHATROOM_CONTEXT}", chatroom_context)
     prompt = prompt.replace("{LAST_AGENT}", last_agent)
+    prompt = prompt.replace("{LAST_AGENT_TRAITS}", traits_str)
     prompt = prompt.replace("{LAST_AGENT_PROFILE}", profile_str)
     prompt = prompt.replace("{LAST_ACTION}", action_str)
 

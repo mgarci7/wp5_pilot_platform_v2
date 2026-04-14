@@ -20,7 +20,7 @@ A performer profile has two parts:
 1. **Core position** (immutable): the performer's ideological stance on the topic — what they fundamentally believe, whether they support or oppose the measure, and how civil or aggressive they are. This never changes between messages.
 2. **Behavioral history** (evolving): specific arguments made, interactions had, and communication patterns observed so far.
 
-Each update should be a complete revision that replaces the previous profile. Always lead with the core position in one sentence, then describe the behavioral history. Never write a profile that implies the performer's position has shifted. Keep the profile concise (2-5 sentences).
+Each update should be a complete revision that replaces the previous profile. Always lead with the core position in one sentence, then describe the behavioral history. The core position must be consistent with the performer's fixed traits listed above — never write a profile that implies their stance or civility level has shifted. Keep the profile concise (2-5 sentences).
 
 ## Output Format
 
@@ -38,6 +38,8 @@ Include only the updated profile text for the last-acting performer in your resp
 ## Last-Acting Performer 
 
 **{LAST_AGENT}**
+
+{LAST_AGENT_TRAITS}
 
 ### Their Current Profile
 

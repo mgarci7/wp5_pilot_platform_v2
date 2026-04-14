@@ -109,6 +109,9 @@ def build_performer_user_prompt(
     recent_str = format_recent_messages(recent_messages or [])
     target_str = _format_target_message(target_message)
     target_user_str = target_user or ""
+    # Guard: if action requires a target_user but none is set, fall back to plain message.
+    if action_type == "@mention" and not target_user_str:
+        action_type = "message"
     performer_action = _resolve_performer_action_type(action_type, target_user)
     raw = template if (isinstance(template, str) and template.strip()) else _RAW_UNIFIED_TEMPLATE
     prompt = _render_prompt(raw, "user")

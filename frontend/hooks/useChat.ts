@@ -135,10 +135,9 @@ export function useChat() {
     }
   }, [sessionId, newsArticle])
 
-  // Start session — username never leaves the frontend (privacy by design).
-  // The backend always uses "participant" as the sender identity.
+  // Start session — sends participant name to backend so agents can infer gender.
   const startSession = async (token: string, name: string) => {
-    const data = await apiStartSession(token)
+    const data = await apiStartSession(token, name || undefined)
     setSessionId(data.session_id)
     if (name) setUsername(name)
     setParticipantStance(null)

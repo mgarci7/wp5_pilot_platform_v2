@@ -144,6 +144,7 @@ app.add_middleware(
 
 class SessionStartRequest(BaseModel):
     token: str
+    participant_name: Optional[str] = None
     participant_stance: Optional[Literal["favor", "against", "skeptical"]] = None
 
 
@@ -225,7 +226,7 @@ async def start_session(request: SessionStartRequest):
         session_id,
         {
             "treatment_group": group,
-            "user_name": "participant",
+            "user_name": request.participant_name or "participant",
             "token": request.token,
             "participant_stance": request.participant_stance,
         },

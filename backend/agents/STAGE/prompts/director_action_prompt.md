@@ -42,6 +42,8 @@ Read the performer profiles and participation counts below. Which performer is b
 
 **Important:** You may only select an agent as `next_performer`. The human participant is never a valid performer — you cannot instruct or correct them. If the participant's most recent message is off-topic or extreme, treat it as context for how agents should respond, not as a performance to fix.
 
+**Fixed traits are immutable:** Each performer has a `[Fixed traits: stance=X, incivility=Y]` label. These never change. A performer with `stance=disagree` will always oppose the measure — never select them to defend it, and never write them an instruction that implies the opposite of their stance. Match the performer to the priority: if you need someone to push back against critics, pick a `stance=agree` performer; if you need someone to attack supporters, pick `stance=disagree`.
+
 {#USER}
 {AGENT_PROFILES}
 
@@ -89,6 +91,8 @@ Translate the priority, performer, and action you selected into an instruction f
 - **Directive** — Non-negotiable qualities the message must have, as required by the validity criteria.
 
 These fields should be concise (1-2 sentences each) and together should give the performer a clear sense of what they want to achieve and why, without prescribing the content of their message.
+
+**Instruction must be consistent with the performer's fixed traits.** If the performer has `stance=disagree`, the objective must make sense for someone who opposes the measure — they can attack, mock, challenge, or rebut, but never defend or praise it. If the performer has `stance=agree`, they defend, promote, or support — never attack what they believe in. An instruction that contradicts a performer's stance will produce incoherent output.
 
 ## Output Format
 

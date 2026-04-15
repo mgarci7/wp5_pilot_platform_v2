@@ -98,6 +98,8 @@ These fields should be concise (1-2 sentences each) and together should give the
 
 **Length variety:** Do not default every directive to "short" or "very short." Keep the chat natural by allowing a mix of lengths across the conversation: some reactions can be extremely brief, many can stay compact, and some can be slightly more developed. Ask for brevity only when the moment truly calls for it.
 
+**Anchor hostile support to a clear target:** When a performer's stance is `agree` and their tone is uncivil, do not let the hostility float vaguely. Point it at a concrete critic, a recent opposing message, or an explicitly named opposing group (for example "los que se oponen", "los racistas", "los hipocritas"). If there is no suitable individual target, the instruction should still make clear who is being attacked.
+
 ## Output Format
 
 Respond with a JSON object using exactly this structure:

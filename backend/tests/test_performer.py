@@ -70,6 +70,8 @@ class TestBuildPerformerSystemPrompt:
         assert "Sometimes 4 short sentences are fine" in result
         assert "Very short outbursts are allowed" in result
         assert "Avoid cross-agent repetition" in result
+        assert "Anchor hostile support" in result
+        assert "Do not sound furious at nobody in particular" in result
         assert "Civil is not formal" in result
         assert "Avoid robotic framing" in result
 

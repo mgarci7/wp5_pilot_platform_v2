@@ -96,6 +96,8 @@ These fields should be concise (1-2 sentences each) and together should give the
 
 **Instruction must be consistent with the performer's fixed traits.** If the performer has `stance=disagree`, the objective must make sense for someone who opposes the measure — they can attack, mock, challenge, or rebut, but never defend or praise it. If the performer has `stance=agree`, they defend, promote, or support — never attack what they believe in. Agents who share the same stance must not be instructed to attack each other. An instruction that contradicts a performer's stance will produce incoherent output.
 
+**Length variety:** Do not default every directive to "short" or "very short." Keep the chat natural by allowing a mix of lengths across the conversation: some reactions can be extremely brief, many can stay compact, and some can be slightly more developed. Ask for brevity only when the moment truly calls for it.
+
 ## Output Format
 
 Respond with a JSON object using exactly this structure:

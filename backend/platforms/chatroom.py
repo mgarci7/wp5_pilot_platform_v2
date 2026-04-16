@@ -34,32 +34,39 @@ def _non_uncivil_order(target: int) -> List[str]:
 
 
 def _participant_stance_preferences(participant_stance: Optional[str]) -> tuple[List[str], List[str], List[str], List[str]]:
+    """Return (like_ideologies, opposite_ideologies, like_ideologies_order, opposite_ideologies_order).
+
+    Ideology encodes political position and stance on the article:
+      left   = pro-measure (immigration regularisation / climate action)
+      right  = anti-measure
+      center = sceptical / mixed
+
+    Like-minded agents are those whose ideology aligns with the participant's stance.
+    """
     stance = (participant_stance or "").strip().lower()
     if stance == "against":
-        return (["disagree"], ["agree", "neutral"], ["right", "center", "left"], ["left", "center", "right"])
+        # Participant opposes the measure → right-leaning agents are like-minded
+        return (["right", "center"], ["left", "center"], ["right", "center", "left"], ["left", "center", "right"])
     if stance == "skeptical":
-        return (["neutral"], ["agree", "disagree"], ["center", "left", "right"], ["center", "right", "left"])
-    # Default to "favor" and any unknown value.
-    return (["agree"], ["disagree", "neutral"], ["left", "center", "right"], ["right", "center", "left"])
+        # Participant is undecided → center agents are like-minded
+        return (["center"], ["left", "right"], ["center", "left", "right"], ["center", "right", "left"])
+    # Default to "favor" and any unknown value → left-leaning agents are like-minded
+    return (["left", "center"], ["right", "center"], ["left", "center", "right"], ["right", "center", "left"])
 
 
 def _rank_pool_agents(
     agents: List[dict],
     *,
-    stance_order: List[str],
     ideology_order: List[str],
     incivility_order: List[str],
 ) -> List[dict]:
-    stance_rank = {value: i for i, value in enumerate(stance_order)}
     ideology_rank = {value: i for i, value in enumerate(ideology_order)}
     incivility_rank = {value: i for i, value in enumerate(incivility_order)}
 
-    def _key(agent: dict) -> tuple[int, int, int, str]:
-        stance = str(agent.get("stance", "neutral"))
+    def _key(agent: dict) -> tuple[int, int, str]:
         ideology = str(agent.get("ideology", "center"))
         incivility = str(agent.get("incivility", "civil"))
         return (
-            stance_rank.get(stance, len(stance_order)),
             ideology_rank.get(ideology, len(ideology_order)),
             incivility_rank.get(incivility, len(incivility_order)),
             str(agent.get("name", "")),
@@ -73,7 +80,6 @@ def _take_ranked_agents(
     *,
     count: int,
     used_ids: set[str],
-    stance_order: List[str],
     ideology_order: List[str],
     incivility_order: List[str],
     allowed_incivilities: Optional[List[str]] = None,
@@ -92,7 +98,6 @@ def _take_ranked_agents(
     ]
     ranked = _rank_pool_agents(
         filtered,
-        stance_order=stance_order,
         ideology_order=ideology_order,
         incivility_order=incivility_order,
     )
@@ -183,7 +188,7 @@ class SimulationSession:
         # Initialise session state — pool mode overrides agent list.
         # The participant self-report is a prior, not ground truth.
         self._agent_mode = self.simulation_config.get("agent_mode", "prompt")
-        self._agent_traits: Dict[str, Dict[str, str]] = {}  # name → {stance, incivility, ideology}
+        self._agent_traits: Dict[str, Dict[str, str]] = {}  # name → {ideology, incivility}
 
         if self._agent_mode == "pool":
             agent_names, agent_personas, self._agent_traits = self._select_pool_agents(
@@ -357,16 +362,16 @@ class SimulationSession:
         like_non_uncivil_count = max(0, like_count - like_uncivil_count)
         opposite_non_uncivil_count = max(0, opposite_count - opposite_uncivil_count)
 
-        like_stances, opposite_stances, like_ideologies, opposite_ideologies = _participant_stance_preferences(
+        like_ideologies, opposite_ideologies, like_ideologies_order, opposite_ideologies_order = _participant_stance_preferences(
             participant_stance_hint
         )
         incivility_order = _incivility_order(incivility_target)
         non_uncivil_order = _non_uncivil_order(incivility_target)
 
-        like_candidates = [a for a in candidate_pool if str(a.get("stance", "neutral")) in like_stances]
+        like_candidates = [a for a in candidate_pool if str(a.get("ideology", "center")) in like_ideologies]
         if not like_candidates:
             like_candidates = list(candidate_pool)
-        opposite_candidates = [a for a in candidate_pool if str(a.get("stance", "neutral")) in opposite_stances]
+        opposite_candidates = [a for a in candidate_pool if str(a.get("ideology", "center")) in opposite_ideologies]
         if not opposite_candidates:
             opposite_candidates = list(candidate_pool)
 
@@ -378,8 +383,7 @@ class SimulationSession:
             like_candidates,
             count=like_uncivil_count,
             used_ids=used_ids,
-            stance_order=like_stances,
-            ideology_order=like_ideologies,
+            ideology_order=like_ideologies_order,
             incivility_order=["uncivil"],
             allowed_incivilities=["uncivil"],
         ))
@@ -387,8 +391,7 @@ class SimulationSession:
             opposite_candidates,
             count=opposite_uncivil_count,
             used_ids=used_ids,
-            stance_order=opposite_stances,
-            ideology_order=opposite_ideologies,
+            ideology_order=opposite_ideologies_order,
             incivility_order=["uncivil"],
             allowed_incivilities=["uncivil"],
         ))
@@ -396,8 +399,7 @@ class SimulationSession:
             like_candidates,
             count=like_non_uncivil_count,
             used_ids=used_ids,
-            stance_order=like_stances,
-            ideology_order=like_ideologies,
+            ideology_order=like_ideologies_order,
             incivility_order=non_uncivil_order,
             allowed_incivilities=non_uncivil_order,
         ))
@@ -405,8 +407,7 @@ class SimulationSession:
             opposite_candidates,
             count=opposite_non_uncivil_count,
             used_ids=used_ids,
-            stance_order=opposite_stances,
-            ideology_order=opposite_ideologies,
+            ideology_order=opposite_ideologies_order,
             incivility_order=non_uncivil_order,
             allowed_incivilities=non_uncivil_order,
         ))
@@ -422,8 +423,7 @@ class SimulationSession:
                 like_candidates,
                 count=remaining_like,
                 used_ids=used_ids,
-                stance_order=like_stances,
-                ideology_order=like_ideologies,
+                ideology_order=like_ideologies_order,
                 incivility_order=incivility_order,
             ))
 
@@ -436,20 +436,19 @@ class SimulationSession:
                 opposite_candidates,
                 count=remaining_opposite,
                 used_ids=used_ids,
-                stance_order=opposite_stances,
-                ideology_order=opposite_ideologies,
+                ideology_order=opposite_ideologies_order,
                 incivility_order=incivility_order,
             ))
 
         # Final fallback only if the pool cannot satisfy the exact quota structure.
         remaining_total = max(0, target_count - len(pool_agents))
         if remaining_total > 0:
+            fallback_ideology_order = like_ideologies_order + [i for i in opposite_ideologies_order if i not in like_ideologies_order]
             pool_agents.extend(_take_ranked_agents(
                 candidate_pool,
                 count=remaining_total,
                 used_ids=used_ids,
-                stance_order=like_stances + opposite_stances,
-                ideology_order=like_ideologies + [i for i in opposite_ideologies if i not in like_ideologies],
+                ideology_order=fallback_ideology_order,
                 incivility_order=incivility_order,
             ))
 
@@ -458,7 +457,6 @@ class SimulationSession:
         traits: Dict[str, Dict[str, str]] = {}
         for a in pool_agents:
             traits[a["name"]] = {
-                "stance": a.get("stance", "neutral"),
                 "incivility": a.get("incivility", "civil"),
                 "ideology": a.get("ideology", "center"),
             }

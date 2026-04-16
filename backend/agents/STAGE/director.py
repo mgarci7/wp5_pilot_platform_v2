@@ -81,15 +81,12 @@ def format_agent_profiles(
             trait = traits.get(name)
             if trait:
                 trait_bits = []
-                stance = trait.get("stance")
-                incivility = trait.get("incivility")
                 ideology = trait.get("ideology")
-                if stance:
-                    trait_bits.append(f"stance={stance}")
-                if incivility:
-                    trait_bits.append(f"incivility={incivility}")
+                incivility = trait.get("incivility")
                 if ideology:
                     trait_bits.append(f"ideology={ideology}")
+                if incivility:
+                    trait_bits.append(f"incivility={incivility}")
                 if trait_bits:
                     trait_suffix = f" [Fixed traits: {', '.join(trait_bits)}]"
 
@@ -213,12 +210,10 @@ def build_update_user_prompt(
 
     if last_agent_traits:
         traits_parts = []
-        if last_agent_traits.get("stance"):
-            traits_parts.append(f"stance={last_agent_traits['stance']}")
-        if last_agent_traits.get("incivility"):
-            traits_parts.append(f"incivility={last_agent_traits['incivility']}")
         if last_agent_traits.get("ideology"):
             traits_parts.append(f"ideology={last_agent_traits['ideology']}")
+        if last_agent_traits.get("incivility"):
+            traits_parts.append(f"incivility={last_agent_traits['incivility']}")
         traits_str = f"[Fixed traits: {', '.join(traits_parts)}]" if traits_parts else ""
     else:
         traits_str = ""

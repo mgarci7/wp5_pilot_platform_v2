@@ -324,27 +324,33 @@ class Orchestrator:
         self._action_system_prompt: Optional[str] = None
 
     @staticmethod
-    def _normalize_agent_stance(raw_stance: Optional[str]) -> Optional[str]:
-        """Collapse stance labels to comparable buckets for anti-infighting rules."""
-        if not raw_stance:
+    def _normalize_agent_ideology(raw_ideology: Optional[str]) -> Optional[str]:
+        """Collapse ideology labels to left/right/center buckets."""
+        if not raw_ideology:
             return None
-        stance = str(raw_stance).strip().lower()
-        if stance in {"agree", "favor", "favour", "support", "pro"}:
-            return "agree"
-        if stance in {"disagree", "against", "oppose", "anti"}:
-            return "disagree"
+        ideology = str(raw_ideology).strip().lower()
+        if ideology in {"left", "pro", "favor", "favour", "support", "agree"}:
+            return "left"
+        if ideology in {"right", "anti", "against", "oppose", "disagree"}:
+            return "right"
+        if ideology in {"center", "centre", "neutral", "mixed", "skeptical"}:
+            return "center"
         return None
 
     def _agents_share_measure_side(self, actor_name: Optional[str], target_name: Optional[str]) -> bool:
-        """Return True when both agents hold the same non-neutral stance on the measure."""
+        """Return True when both agents hold the same non-neutral ideology on the measure."""
         if not actor_name or not target_name or actor_name == target_name:
             return False
 
         actor_traits = self._agent_traits.get(actor_name) or {}
         target_traits = self._agent_traits.get(target_name) or {}
-        actor_stance = self._normalize_agent_stance(actor_traits.get("stance"))
-        target_stance = self._normalize_agent_stance(target_traits.get("stance"))
-        return actor_stance is not None and actor_stance == target_stance
+        actor_ideology = self._normalize_agent_ideology(actor_traits.get("ideology"))
+        target_ideology = self._normalize_agent_ideology(target_traits.get("ideology"))
+        return (
+            actor_ideology is not None
+            and actor_ideology != "center"
+            and actor_ideology == target_ideology
+        )
 
     @staticmethod
     def _normalize_participant_stance_hint(raw_stance: Optional[str]) -> Optional[str]:
@@ -362,20 +368,24 @@ class Orchestrator:
         return None
 
     def _expected_like_minded_for_agent(self, agent_name: str) -> Optional[bool]:
-        """Infer the expected classifier alignment for an agent with fixed pool traits."""
+        """Infer the expected classifier alignment for an agent with fixed pool traits.
+
+        Ideology encodes measure stance: left=pro-measure, right=anti-measure.
+        Like-minded means the agent shares the participant's side.
+        """
         participant_stance = self._normalize_participant_stance_hint(self.participant_stance_hint)
         if participant_stance is None:
             return None
 
         traits = self._agent_traits.get(agent_name) or {}
-        agent_stance = self._normalize_agent_stance(traits.get("stance"))
-        if agent_stance is None:
+        agent_ideology = self._normalize_agent_ideology(traits.get("ideology"))
+        if agent_ideology is None or agent_ideology == "center":
             return None
 
         if participant_stance == "favor":
-            return agent_stance == "agree"
+            return agent_ideology == "left"
         if participant_stance == "against":
-            return agent_stance == "disagree"
+            return agent_ideology == "right"
         if participant_stance == "skeptical":
             return False
         return None

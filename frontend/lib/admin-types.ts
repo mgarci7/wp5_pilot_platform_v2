@@ -64,16 +64,14 @@ export interface SimulationConfig {
   agent_mode?: "prompt" | "pool"
 }
 
-export type AgentStance = "agree" | "disagree" | "neutral"
 export type AgentIncivility = "civil" | "moderate" | "uncivil"
 export type AgentIdeology = "left" | "center" | "right"
 
 export interface PoolAgent {
   id: string
   name: string
-  stance: AgentStance
   incivility: AgentIncivility
-  ideology?: AgentIdeology
+  ideology: AgentIdeology
   persona: string
 }
 

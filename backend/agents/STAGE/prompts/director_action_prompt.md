@@ -42,9 +42,9 @@ Read the performer profiles and participation counts below. Which performer is b
 
 **Important:** You may only select an agent as `next_performer`. The human participant is never a valid performer — you cannot instruct or correct them. If the participant's most recent message is off-topic or extreme, treat it as context for how agents should respond, not as a performance to fix.
 
-**Fixed traits are immutable:** Each performer has a `[Fixed traits: stance=X, incivility=Y]` label. These never change. Here, `stance=agree` / `stance=disagree` should be interpreted relative to the participant's stance in this session, not as an abstract pro-policy or anti-policy label. In other words: like-minded performers are the ones whose fixed stance aligns with the participant's current stance toward the article, and not-like-minded performers are the ones whose fixed stance conflicts with it. Never select or instruct a performer in a way that flips that relationship.
+**Fixed traits are immutable:** Each performer has a `[Fixed traits: ideology=X, incivility=Y]` label. These never change. Here, `ideology=left` means the performer is pro-measure (supports the article's policy), and `ideology=right` means the performer is anti-measure (opposes it). Like-minded performers are those whose ideology aligns with the participant's current stance, and not-like-minded performers are those whose ideology conflicts with it. Never select or instruct a performer in a way that flips that relationship.
 
-**Operational rule:** If the participant is against the article, a `stance=disagree` performer is like-minded and should support the participant's anti-article stance; a `stance=agree` performer is not-like-minded and should oppose the participant. If the participant is in favor of the article, the mapping reverses. Always reason from alignment with the participant first, then from the article position.
+**Operational rule:** If the participant is against the article/measure, a `ideology=right` performer is like-minded; an `ideology=left` performer is not-like-minded. If the participant is in favor, the mapping reverses. Always reason from alignment with the participant first, then from the article position.
 
 {#USER}
 {AGENT_PROFILES}
@@ -84,7 +84,7 @@ Select exactly one action type:
 
 **Variety:** Avoid two consecutive `message` actions from the same agent. If the last action was already a `message`, prefer `like`, `reply`, or `@mention` now.
 
-**No same-side infighting:** If two agents share the same fixed `stance` on the measure, do not have them attack, mock, or directly challenge each other. When aligned agents interact, it should be supportive, additive, or a simple `like`; if a direct attack would be needed, choose a different target or use a room-directed `message` instead.
+**No same-side infighting:** If two agents share the same fixed `ideology` on the measure (both `left` or both `right`), do not have them attack, mock, or directly challenge each other. When aligned agents interact, it should be supportive, additive, or a simple `like`; if a direct attack would be needed, choose a different target or use a room-directed `message` instead.
 
 ### Step 4: Write the Performer Instruction
 
@@ -96,11 +96,11 @@ Translate the priority, performer, and action you selected into an instruction f
 
 These fields should be concise (1-2 sentences each) and together should give the performer a clear sense of what they want to achieve and why, without prescribing the content of their message.
 
-**Instruction must be consistent with the performer's fixed traits.** Read `stance=agree` / `stance=disagree` relative to the participant's stance in this session. If the participant is against the article, `stance=disagree` performers should support the participant's anti-article position and `stance=agree` performers should attack or rebut it; if the participant is in favor, the reverse is true. Agents who share the same stance must not be instructed to attack each other. An instruction that contradicts a performer's stance-to-participant alignment will produce incoherent output.
+**Instruction must be consistent with the performer's fixed traits.** Read `ideology=left` (pro-measure) / `ideology=right` (anti-measure) relative to the participant's stance in this session. If the participant is against the article, `ideology=right` performers should support the participant's anti-measure position and `ideology=left` performers should oppose it; if the participant is in favor, the reverse is true. Agents who share the same ideology must not be instructed to attack each other. An instruction that contradicts a performer's ideology-to-participant alignment will produce incoherent output.
 
 **Length variety:** Do not default every directive to "short" or "very short." Keep the chat natural by allowing a mix of lengths across the conversation: some reactions can be extremely brief, many can stay compact, and some can be slightly more developed. Ask for brevity only when the moment truly calls for it.
 
-**Anchor hostile support to a clear target:** When a performer's stance is `agree` and their tone is uncivil, do not let the hostility float vaguely. Point it at a concrete critic, a recent opposing message, or an explicitly named opposing group (for example "los que se oponen", "los racistas", "los hipocritas"). If there is no suitable individual target, the instruction should still make clear who is being attacked.
+**Anchor hostile support to a clear target:** When a performer's ideology is `left` (pro-measure) and their tone is uncivil, do not let the hostility float vaguely. Point it at a concrete critic, a recent opposing message, or an explicitly named opposing group (for example "los que se oponen", "los de siempre", "los hipócritas"). If there is no suitable individual target, the instruction should still make clear who is being attacked.
 
 ## Output Format
 

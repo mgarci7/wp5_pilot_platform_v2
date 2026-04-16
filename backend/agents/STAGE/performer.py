@@ -81,12 +81,10 @@ def build_performer_system_prompt(
     # Inject fixed ideological traits so the performer never contradicts its core position.
     if agent_traits:
         traits_lines = []
-        if agent_traits.get("stance"):
-            traits_lines.append(f"- **Stance on the topic**: {agent_traits['stance']}")
-        if agent_traits.get("incivility"):
-            traits_lines.append(f"- **Incivility level**: {agent_traits['incivility']}")
         if agent_traits.get("ideology"):
             traits_lines.append(f"- **Ideology**: {agent_traits['ideology']}")
+        if agent_traits.get("incivility"):
+            traits_lines.append(f"- **Incivility level**: {agent_traits['incivility']}")
         traits_block = (
             "\n\n## Your Fixed Position (never contradicts this):\n\n" + "\n".join(traits_lines)
             if traits_lines else ""

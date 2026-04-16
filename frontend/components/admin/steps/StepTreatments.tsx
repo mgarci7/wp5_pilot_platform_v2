@@ -131,12 +131,6 @@ function FeatureCheckboxes({
   )
 }
 
-const STANCE_BADGE: Record<string, { label: string; cls: string }> = {
-  agree:    { label: "Agree",    cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
-  disagree: { label: "Disagree", cls: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
-  neutral:  { label: "Neutral",  cls: "bg-gray-100 text-gray-600 dark:bg-gray-700/40 dark:text-gray-300" },
-}
-
 const INCIVILITY_BADGE: Record<string, { label: string; cls: string }> = {
   civil:    { label: "Civil",    cls: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" },
   moderate: { label: "Moderate", cls: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300" },
@@ -209,7 +203,6 @@ function HumanizeRulesEditor({ rules, onChange }: { rules: HumanizeRules; onChan
   )
 }
 
-const DEFAULT_POOL_STANCE: PoolAgent["stance"] = "agree"
 const DEFAULT_POOL_INCIVILITY: PoolAgent["incivility"] = "civil"
 
 function makeNextPoolAgentId(pool: PoolAgent[]): string {
@@ -238,7 +231,6 @@ function AgentPoolEditor({
     const next: PoolAgent = {
       id: makeNextPoolAgentId(pool),
       name: `Agente ${pool.length + 1}`,
-      stance: DEFAULT_POOL_STANCE,
       incivility: DEFAULT_POOL_INCIVILITY,
       ideology: "center",
       persona: "",
@@ -318,18 +310,6 @@ function AgentPoolEditor({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-admin-muted mb-1">Stance</label>
-                  <select
-                    value={agent.stance}
-                    onChange={(e) => updateAgent(index, { stance: e.target.value as PoolAgent["stance"] })}
-                    className={inputClass}
-                  >
-                    <option value="agree">Agree</option>
-                    <option value="disagree">Disagree</option>
-                    <option value="neutral">Neutral</option>
-                  </select>
-                </div>
-                <div>
                   <label className="block text-xs font-medium text-admin-muted mb-1">Incivility</label>
                   <select
                     value={agent.incivility}
@@ -344,7 +324,7 @@ function AgentPoolEditor({
                 <div>
                   <label className="block text-xs font-medium text-admin-muted mb-1">Ideology</label>
                   <select
-                    value={agent.ideology || "center"}
+                    value={agent.ideology}
                     onChange={(e) => updateAgent(index, { ideology: e.target.value as PoolAgent["ideology"] })}
                     className={inputClass}
                   >
@@ -440,11 +420,12 @@ function PoolAgentSelector({
     onChange(ids)
   }
 
-  // Group by stance
-  const byStance: Record<string, PoolAgent[]> = {}
+  // Group by ideology
+  const byIdeology: Record<string, PoolAgent[]> = {}
   for (const agent of pool) {
-    if (!byStance[agent.stance]) byStance[agent.stance] = []
-    byStance[agent.stance].push(agent)
+    const key = agent.ideology
+    if (!byIdeology[key]) byIdeology[key] = []
+    byIdeology[key].push(agent)
   }
 
   return (
@@ -468,15 +449,14 @@ function PoolAgentSelector({
           The backend will use the participant&apos;s survey answer to choose the final agents from this candidate pool.
         </div>
       )}
-      {Object.entries(byStance).map(([stance, agents]) => (
-        <div key={stance}>
-          <p className="text-xs text-admin-faint mb-1 capitalize">{stance}</p>
+      {Object.entries(byIdeology).map(([ideology, agents]) => (
+        <div key={ideology}>
+          <p className="text-xs text-admin-faint mb-1 capitalize">{ideology}</p>
           <div className="flex flex-wrap gap-1.5">
             {agents.map((agent) => {
               const selected = selectedIds.includes(agent.id)
-              const stanceBadge = STANCE_BADGE[agent.stance] ?? STANCE_BADGE.neutral
               const incivilBadge = INCIVILITY_BADGE[agent.incivility] ?? INCIVILITY_BADGE.civil
-              const ideologyBadge = IDEOLOGY_BADGE[agent.ideology || "center"] ?? IDEOLOGY_BADGE.center
+              const ideologyBadge = IDEOLOGY_BADGE[agent.ideology] ?? IDEOLOGY_BADGE.center
               return (
                 <button
                   key={agent.id}
@@ -490,14 +470,11 @@ function PoolAgentSelector({
                   title={agent.persona}
                 >
                   <span className="font-medium">{agent.name}</span>
-                  <span className={`px-1 py-0.5 rounded text-[10px] leading-none ${stanceBadge.cls}`}>
-                    {stanceBadge.label}
+                  <span className={`px-1 py-0.5 rounded text-[10px] leading-none ${ideologyBadge.cls}`}>
+                    {ideologyBadge.label}
                   </span>
                   <span className={`px-1 py-0.5 rounded text-[10px] leading-none ${incivilBadge.cls}`}>
                     {incivilBadge.label}
-                  </span>
-                  <span className={`px-1 py-0.5 rounded text-[10px] leading-none ${ideologyBadge.cls}`}>
-                    {ideologyBadge.label}
                   </span>
                 </button>
               )

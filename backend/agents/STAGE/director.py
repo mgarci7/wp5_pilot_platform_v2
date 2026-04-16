@@ -23,6 +23,22 @@ _EVALUATE_TEMPLATE = (_PROMPTS_DIR / "director_evaluate_prompt.md").read_text(en
 _ACTION_TEMPLATE = (_PROMPTS_DIR / "director_action_prompt.md").read_text(encoding="utf-8")
 
 
+def _format_chat_message_content(message: Message) -> str:
+    """Format message content for Director prompts, compacting seeded news items."""
+    if message.sender != "[news]":
+        return message.content
+
+    metadata = message.metadata if isinstance(message.metadata, dict) else {}
+    headline = str(metadata.get("headline", "")).strip()
+    if headline:
+        return f"Headline shared earlier: {headline}"
+
+    single_line = " ".join((message.content or "").split())
+    if len(single_line) <= 120:
+        return single_line
+    return single_line[:117].rstrip() + "..."
+
+
 # ── Chat log formatting ─────────────────────────────────────────────────────
 
 def format_chat_log(messages: List[Message]) -> str:
@@ -45,7 +61,7 @@ def format_chat_log(messages: List[Message]) -> str:
             meta.append(f"liked by {', '.join(sorted(m.liked_by))}")
 
         meta_str = f" ({'; '.join(meta)})" if meta else ""
-        line = f"[{m.message_id}] {m.sender}{meta_str}: {m.content}"
+        line = f"[{m.message_id}] {m.sender}{meta_str}: {_format_chat_message_content(m)}"
         lines.append(line)
     return "\n".join(lines)
 

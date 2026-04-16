@@ -37,9 +37,10 @@ def format_recent_messages(messages: List[Message]) -> str:
 
 def format_recent_room_messages(messages: List[Message]) -> str:
     """Format recent messages from other people in the room."""
-    if not messages:
+    visible_messages = [m for m in messages if m.sender != "[news]"]
+    if not visible_messages:
         return "(No recent messages from other people.)"
-    return "\n".join(f"- {m.sender}: {m.content}" for m in messages)
+    return "\n".join(f"- {m.sender}: {m.content}" for m in visible_messages)
 
 
 def _format_target_message(target_message: Optional[Message]) -> str:

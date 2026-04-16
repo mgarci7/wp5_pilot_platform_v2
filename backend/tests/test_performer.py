@@ -212,3 +212,11 @@ class TestFormatRecentRoomMessages:
         ])
         assert "- Bob: Hola" in result
         assert "- Lucia: Adios" in result
+
+    def test_news_messages_are_excluded(self):
+        result = format_recent_room_messages([
+            _msg(sender="[news]", content="Titular largo\n\nCuerpo muy largo"),
+            _msg(sender="Bob", content="Hola"),
+        ])
+        assert "- Bob: Hola" in result
+        assert "[news]" not in result

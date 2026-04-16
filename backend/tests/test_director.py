@@ -71,6 +71,16 @@ class TestFormatChatLog:
         result = format_chat_log([msg])
         assert ";" in result
 
+    def test_news_message_uses_headline_instead_of_full_body(self):
+        msg = _msg(
+            sender="[news]",
+            content="Headline here\n\nVery long article body that should not be copied into the director chat log.",
+            metadata={"headline": "Headline here"},
+        )
+        result = format_chat_log([msg])
+        assert "Headline shared earlier: Headline here" in result
+        assert "Very long article body" not in result
+
 
 # ── format_agent_profiles ──────────────────────────────────────────────────
 

@@ -144,8 +144,9 @@ class TestOrchestratorInit:
         assert "Alice" in orch._name_map
         assert "Bob" in orch._name_map
         assert "participant" in orch._name_map
-        for v in orch._name_map.values():
-            assert v.startswith("Performer ")
+        assert orch._name_map["Alice"].startswith("Performer ")
+        assert orch._name_map["Bob"].startswith("Performer ")
+        assert orch._name_map["participant"] == "participant"
 
     def test_reverse_map(self):
         state = _make_state()
@@ -713,6 +714,220 @@ class TestExecuteTurnWait:
         last_agent_before = orch._last_agent
         await orch.execute_turn("criteria_A")
         assert orch._last_agent == last_agent_before
+
+
+class TestConsecutiveSpeakerLimit:
+
+    @pytest.mark.asyncio
+    async def test_third_consecutive_speaking_turn_becomes_wait(self):
+        state = _make_state()
+        state.add_message(Message.create(sender="Alice", content="Primera"))
+        state.add_message(Message.create(sender="Alice", content="Segunda"))
+
+        orch, logger = _make_orchestrator(state=state)
+        anon_alice = orch._name_map["Alice"]
+        orch.director_llm.generate_response = AsyncMock(
+            return_value=_action_json(next_performer=anon_alice, action_type="message")
+        )
+
+        result = await orch.execute_turn("criteria_A")
+
+        assert result is not None
+        assert result.action_type == "wait"
+        assert result.agent_name == "Alice"
+        orch.performer_llm.generate_response.assert_not_called()
+        orch.moderator_llm.generate_response.assert_not_called()
+        logger.log_error.assert_any_call(
+            "director_consecutive_speaker_limit",
+            "Agent 'Alice' already spoke 2 turns in a row; skipping a third consecutive speaking turn",
+        )
+
+
+class TestRoomWideOpeners:
+
+    @pytest.mark.asyncio
+    async def test_first_room_wide_opener_for_agent_is_allowed(self):
+        state = _make_state()
+        state.add_message(Message.create(sender="participant", content="Arrancamos el debate"))
+
+        orch, _ = _make_orchestrator(state=state)
+        anon_alice = orch._name_map["Alice"]
+        orch.director_llm.generate_response = AsyncMock(
+            return_value=_action_json(next_performer=anon_alice, action_type="message")
+        )
+        orch.performer_llm.generate_response = AsyncMock(return_value="Pues a mi me parece fatal.")
+        orch.moderator_llm.generate_response = AsyncMock(return_value="Pues a mi me parece fatal.")
+
+        result = await orch.execute_turn("criteria_A")
+
+        assert result is not None
+        assert result.action_type == "message"
+        assert result.message.reply_to is None
+
+    @pytest.mark.asyncio
+    async def test_consecutive_room_wide_opener_is_redirected_to_reply(self):
+        state = _make_state()
+        first_opener = Message.create(sender="Bob", content="Esto es un desastre")
+        participant_msg = Message.create(sender="participant", content="Yo no lo veo igual")
+        state.add_message(first_opener)
+        state.add_message(participant_msg)
+
+        orch, logger = _make_orchestrator(state=state)
+        anon_alice = orch._name_map["Alice"]
+        orch.director_llm.generate_response = AsyncMock(
+            return_value=_action_json(next_performer=anon_alice, action_type="message")
+        )
+        orch.performer_llm.generate_response = AsyncMock(return_value="Y ademas nos lo venden fatal.")
+        orch.moderator_llm.generate_response = AsyncMock(return_value="Y ademas nos lo venden fatal.")
+
+        result = await orch.execute_turn("criteria_A")
+
+        assert result is not None
+        assert result.action_type == "reply"
+        assert result.message.reply_to == participant_msg.message_id
+        logger.log_error.assert_any_call(
+            "director_room_wide_opener_redirected",
+            "Redirected room-wide opener for 'Alice' to reply to 'participant'",
+        )
+
+    @pytest.mark.asyncio
+    async def test_third_room_wide_opener_in_session_is_redirected(self):
+        state = _make_state()
+        first_opener = Message.create(sender="Alice", content="Esto no tiene sentido")
+        second_reply = Message.create(sender="participant", content="Explica eso")
+        third_opener = Message.create(sender="Bob", content="Es un disparate total")
+        state.add_message(first_opener)
+        state.add_message(second_reply)
+        state.add_message(third_opener)
+
+        orch, logger = _make_orchestrator(state=state)
+        anon_alice = orch._name_map["Alice"]
+        # Force Alice again here so it also covers "not first turn" opener redirection.
+        orch.director_llm.generate_response = AsyncMock(
+            return_value=_action_json(next_performer=anon_alice, action_type="message")
+        )
+        orch.performer_llm.generate_response = AsyncMock(return_value="No compro ese cuento.")
+        orch.moderator_llm.generate_response = AsyncMock(return_value="No compro ese cuento.")
+
+        result = await orch.execute_turn("criteria_A")
+
+        assert result is not None
+        assert result.action_type == "reply"
+        assert result.message.reply_to == third_opener.message_id
+        logger.log_error.assert_any_call(
+            "director_room_wide_opener_redirected",
+            "Redirected room-wide opener for 'Alice' to reply to 'Bob'",
+        )
+
+
+class TestFixedStanceGuard:
+
+    @pytest.mark.asyncio
+    async def test_mismatched_fixed_stance_retries_once_and_keeps_second_draft(self):
+        state = _make_state(participant_stance_hint="against")
+        orch, logger = _make_orchestrator(
+            state=state,
+            agent_traits={"Alice": {"stance": "disagree"}},
+        )
+        anon_alice = orch._name_map["Alice"]
+
+        orch.director_llm.generate_response = AsyncMock(
+            return_value=_action_json(next_performer=anon_alice, action_type="message")
+        )
+        orch.performer_llm.generate_response = AsyncMock(
+            side_effect=[
+                "Este plan es necesario y justo.",
+                "Este plan es una vergüenza total.",
+            ]
+        )
+        orch.moderator_llm.generate_response = AsyncMock(
+            side_effect=[
+                "Este plan es necesario y justo.",
+                "Este plan es una vergüenza total.",
+            ]
+        )
+        orch.classifier_llm.generate_response = AsyncMock(
+            side_effect=[
+                json.dumps({
+                    "is_incivil": False,
+                    "is_like_minded": False,
+                    "inferred_participant_stance": "against",
+                    "rationale": "Mismatch",
+                }),
+                json.dumps({
+                    "is_incivil": True,
+                    "is_like_minded": True,
+                    "inferred_participant_stance": "against",
+                    "rationale": "Aligned",
+                }),
+            ]
+        )
+
+        result = await orch.execute_turn("criteria_A")
+
+        assert result is not None
+        assert result.action_type == "message"
+        assert result.message.content == "Este plan es una vergüenza total."
+        assert result.message.is_like_minded is True
+        assert orch.performer_llm.generate_response.call_count == 2
+        logger.log_error.assert_any_call(
+            "performer_stance_mismatch_retry",
+            "Generated message contradicted fixed stance for 'Alice'; retrying once",
+            context={"expected_like_minded": True, "actual_like_minded": False, "action_type": "message"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_repeated_fixed_stance_mismatch_becomes_wait(self):
+        state = _make_state(participant_stance_hint="against")
+        orch, logger = _make_orchestrator(
+            state=state,
+            agent_traits={"Alice": {"stance": "disagree"}},
+        )
+        anon_alice = orch._name_map["Alice"]
+
+        orch.director_llm.generate_response = AsyncMock(
+            return_value=_action_json(next_performer=anon_alice, action_type="message")
+        )
+        orch.performer_llm.generate_response = AsyncMock(
+            side_effect=[
+                "Este plan es necesario y justo.",
+                "Es lo unico sensato que puede hacer el Govern.",
+            ]
+        )
+        orch.moderator_llm.generate_response = AsyncMock(
+            side_effect=[
+                "Este plan es necesario y justo.",
+                "Es lo unico sensato que puede hacer el Govern.",
+            ]
+        )
+        orch.classifier_llm.generate_response = AsyncMock(
+            side_effect=[
+                json.dumps({
+                    "is_incivil": False,
+                    "is_like_minded": False,
+                    "inferred_participant_stance": "against",
+                    "rationale": "Mismatch",
+                }),
+                json.dumps({
+                    "is_incivil": False,
+                    "is_like_minded": False,
+                    "inferred_participant_stance": "against",
+                    "rationale": "Mismatch again",
+                }),
+            ]
+        )
+
+        result = await orch.execute_turn("criteria_A")
+
+        assert result is not None
+        assert result.action_type == "wait"
+        assert result.message is None
+        assert orch.performer_llm.generate_response.call_count == 2
+        logger.log_error.assert_any_call(
+            "performer_stance_mismatch_exhausted",
+            "Generated message for 'Alice' still contradicted fixed stance after retry; skipping turn",
+            context={"expected_like_minded": True, "actual_like_minded": False, "action_type": "message"},
+        )
 
 
 # ── execute_turn: error handling ─────────────────────────────────────────────

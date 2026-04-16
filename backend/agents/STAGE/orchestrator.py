@@ -40,6 +40,8 @@ from agents.STAGE.classifier import (
 
 
 MAX_PERFORMER_RETRIES = 3
+MAX_STANCE_RETRIES = 1
+MAX_ROOM_WIDE_OPENERS = 2
 
 
 @dataclass
@@ -344,6 +346,110 @@ class Orchestrator:
         target_stance = self._normalize_agent_stance(target_traits.get("stance"))
         return actor_stance is not None and actor_stance == target_stance
 
+    @staticmethod
+    def _normalize_participant_stance_hint(raw_stance: Optional[str]) -> Optional[str]:
+        """Collapse participant stance hints to comparable buckets."""
+        if not raw_stance:
+            return None
+
+        stance = str(raw_stance).strip().lower()
+        if stance in {"favor", "favour", "in favor", "in favour", "support", "pro", "agree"}:
+            return "favor"
+        if stance in {"against", "oppose", "anti", "disagree"}:
+            return "against"
+        if stance in {"skeptical", "skeptic", "unsure", "neutral", "mixed"}:
+            return "skeptical"
+        return None
+
+    def _expected_like_minded_for_agent(self, agent_name: str) -> Optional[bool]:
+        """Infer the expected classifier alignment for an agent with fixed pool traits."""
+        participant_stance = self._normalize_participant_stance_hint(self.participant_stance_hint)
+        if participant_stance is None:
+            return None
+
+        traits = self._agent_traits.get(agent_name) or {}
+        agent_stance = self._normalize_agent_stance(traits.get("stance"))
+        if agent_stance is None:
+            return None
+
+        if participant_stance == "favor":
+            return agent_stance == "agree"
+        if participant_stance == "against":
+            return agent_stance == "disagree"
+        if participant_stance == "skeptical":
+            return False
+        return None
+
+    def _message_contradicts_fixed_stance(
+        self,
+        agent_name: str,
+        classification: Dict[str, Optional[object]],
+    ) -> bool:
+        """Return True when classifier output clearly conflicts with fixed stance."""
+        expected_like_minded = self._expected_like_minded_for_agent(agent_name)
+        actual_like_minded = classification.get("is_like_minded")
+        if expected_like_minded is None or actual_like_minded is None:
+            return False
+        return bool(actual_like_minded) != expected_like_minded
+
+    @staticmethod
+    def _is_room_wide_opener_message(message: Message) -> bool:
+        """Return True when a published message is a non-targeted room-wide opener."""
+        return (
+            bool(message.content)
+            and not message.reply_to
+            and not message.mentions
+            and message.sender != "[news]"
+        )
+
+    def _agent_has_spoken_before(self, agent_name: str) -> bool:
+        """Return True if the agent has already posted a message in this session."""
+        return any(message.sender == agent_name for message in self.state.messages)
+
+    def _count_room_wide_openers(self, agent_names: Set[str]) -> int:
+        """Count first-turn room-wide opener messages already present in the session."""
+        seen_speakers: Set[str] = set()
+        count = 0
+        for message in self.state.messages:
+            if message.sender not in agent_names or message.sender in seen_speakers:
+                continue
+            seen_speakers.add(message.sender)
+            if self._is_room_wide_opener_message(message):
+                count += 1
+        return count
+
+    def _last_message_was_room_wide_opener(self, agent_names: Set[str]) -> bool:
+        """Return True when the latest agent message was a room-wide opener."""
+        for message in reversed(self.state.messages):
+            if message.sender in agent_names:
+                return self._is_room_wide_opener_message(message)
+        return False
+
+    def _find_room_wide_anchor_message(self, agent_name: str) -> Optional[Message]:
+        """Pick a recent non-self message to anchor a redirected opener to."""
+        for message in reversed(self.state.messages):
+            if message.sender == agent_name or message.sender == "[news]":
+                continue
+            return message
+        return None
+
+    @staticmethod
+    def _trailing_speaker_streak(messages: List[Message], agent_names: Set[str]) -> tuple[Optional[str], int]:
+        """Return the trailing consecutive speaking streak for agent messages."""
+        speaker = None
+        count = 0
+        for msg in reversed(messages):
+            if msg.sender not in agent_names:
+                break
+            if speaker is None:
+                speaker = msg.sender
+                count = 1
+                continue
+            if msg.sender != speaker:
+                break
+            count += 1
+        return speaker, count
+
     def set_participant_stance_hint(self, participant_stance_hint: Optional[str]) -> None:
         """Refresh the soft prior used in prompts and report summaries."""
         self.participant_stance_hint = participant_stance_hint
@@ -466,12 +572,21 @@ class Orchestrator:
         #    so each pipeline's Director picks from its own pool.
         action_profiles = self.agent_profiles
         action_perf_counts = self._performer_counts
+        speaking_agent_names = {a.name for a in agents if a.name != self.state.user_name}
+        capped_speaker, capped_streak = self._trailing_speaker_streak(recent_action, speaking_agent_names)
+        disallowed_speaker = capped_speaker if capped_streak >= 2 else None
         if allowed_performers is not None:
             allowed_anon = {self._name_map[n] for n in allowed_performers if n in self._name_map}
             # Always include the human so the Director can still yield ('wait').
             allowed_anon.add(self._anon_user)
+            if disallowed_speaker and disallowed_speaker in self._name_map:
+                allowed_anon.discard(self._name_map[disallowed_speaker])
             action_profiles = {k: v for k, v in self.agent_profiles.items() if k in allowed_anon}
             action_perf_counts = {k: v for k, v in self._performer_counts.items() if k in allowed_anon}
+        elif disallowed_speaker and disallowed_speaker in self._name_map:
+            disallowed_anon = self._name_map[disallowed_speaker]
+            action_profiles = {k: v for k, v in self.agent_profiles.items() if k != disallowed_anon}
+            action_perf_counts = {k: v for k, v in self._performer_counts.items() if k != disallowed_anon}
 
         action_data = await self._director_action(
             anon_recent_action,
@@ -547,6 +662,68 @@ class Orchestrator:
                 "directive": "Keep it conversational and on-topic; stay true to your fixed stance and character.",
             }
 
+        is_room_wide_opener = (
+            action_type == "message"
+            and not target_user
+            and not target_message_id
+        )
+        if is_room_wide_opener and not (disallowed_speaker and agent_name == disallowed_speaker):
+            is_first_turn_for_agent = not self._agent_has_spoken_before(agent_name)
+            existing_room_wide_openers = self._count_room_wide_openers(agent_names)
+            previous_was_room_wide_opener = self._last_message_was_room_wide_opener(agent_names)
+            room_wide_violation = (
+                not is_first_turn_for_agent
+                or existing_room_wide_openers >= MAX_ROOM_WIDE_OPENERS
+                or previous_was_room_wide_opener
+            )
+            if room_wide_violation:
+                anchor_message = self._find_room_wide_anchor_message(agent_name)
+                if anchor_message is None:
+                    self.logger.log_error(
+                        "director_room_wide_opener_blocked",
+                        f"Blocked room-wide opener for '{agent_name}' but found no anchor message; skipping turn",
+                    )
+                    self._turns_since_evaluate = _saved_counter
+                    self._has_completed_first_interval = _saved_first_interval
+                    return TurnResult(
+                        action_type="wait",
+                        agent_name=agent_name,
+                        priority=priority,
+                        performer_rationale=performer_rationale,
+                        action_rationale=action_rationale,
+                    )
+
+                self.logger.log_error(
+                    "director_room_wide_opener_redirected",
+                    f"Redirected room-wide opener for '{agent_name}' to reply to '{anchor_message.sender}'",
+                )
+                action_type = "reply"
+                action_data["action_type"] = "reply"
+                target_message_id = anchor_message.message_id
+                action_data["target_message_id"] = target_message_id
+                target_user = None
+                action_data["target_user"] = None
+                action_data["performer_instruction"] = {
+                    "objective": f"Join the ongoing thread by responding to {anchor_message.sender}'s recent message.",
+                    "motivation": "A fresh room-wide statement here would make the chat feel disjointed, so anchor yourself to the existing conversation.",
+                    "directive": "Reply directly and conversationally to the quoted message instead of posting a general statement to the room.",
+                }
+
+        if disallowed_speaker and agent_name == disallowed_speaker:
+            self.logger.log_error(
+                "director_consecutive_speaker_limit",
+                f"Agent '{agent_name}' already spoke {capped_streak} turns in a row; skipping a third consecutive speaking turn",
+            )
+            self._turns_since_evaluate = _saved_counter
+            self._has_completed_first_interval = _saved_first_interval
+            return TurnResult(
+                action_type="wait",
+                agent_name=agent_name,
+                priority=priority,
+                performer_rationale=performer_rationale,
+                action_rationale=action_rationale,
+            )
+
         # 3b. Fix self-mention: if Director told an agent to @mention itself,
         #     downgrade to a regular message (no target_user).
         if action_type == "@mention" and target_user and target_user == agent_name:
@@ -612,7 +789,15 @@ class Orchestrator:
         # Validate that the chosen agent exists; fall back to a random valid agent.
         if not agents:
             self.logger.log_error("director_agent", "No agents available for this session")
-            return None
+            self._turns_since_evaluate = _saved_counter
+            self._has_completed_first_interval = _saved_first_interval
+            return TurnResult(
+                action_type="wait",
+                agent_name=self.state.user_name,
+                priority=priority,
+                performer_rationale=performer_rationale,
+                action_rationale=action_rationale,
+            )
         if not any(a.name == agent_name for a in agents):
             pool = list(allowed_performers) if allowed_performers else [a.name for a in agents]
             fallback = random.choice(pool)
@@ -728,7 +913,7 @@ class Orchestrator:
         agent_obj = next((a for a in agents if a.name == agent_name), None)
         agent_persona = (agent_obj.persona or None) if agent_obj else None
 
-        performer_user_prompt = build_performer_user_prompt(
+        base_performer_user_prompt = build_performer_user_prompt(
             instruction=performer_instruction,
             agent_profile=agent_profile,
             action_type=action_type,
@@ -743,8 +928,14 @@ class Orchestrator:
             ),
             template=self.performer_prompt_template,
         )
+        performer_user_prompt = base_performer_user_prompt
 
         content = None
+        classification = {}
+        mentions = None
+        reply_to = None
+        quoted_text = None
+        stance_retry_count = 0
 
         # Build (or retrieve cached) per-agent performer system prompt.
         if agent_name not in self._performer_system_prompts:
@@ -810,21 +1001,107 @@ class Orchestrator:
 
             content = parse_moderator_response(moderator_raw)
 
-            if content is not None:
-                if _looks_truncated_response(content):
-                    self.logger.log_error(
-                        "moderator_output_truncated",
-                        f"Moderator output appears truncated (attempt {attempt}/{MAX_PERFORMER_RETRIES})",
-                        context={"agent_name": agent_name, "action_type": action_type},
-                    )
-                    content = None
-                    continue
-                break
-            else:
+            if content is None:
                 self.logger.log_error(
                     "moderator_no_content",
                     f"Moderator could not extract content from performer output (attempt {attempt}/{MAX_PERFORMER_RETRIES})",
                 )
+                continue
+
+            if _looks_truncated_response(content):
+                self.logger.log_error(
+                    "moderator_output_truncated",
+                    f"Moderator output appears truncated (attempt {attempt}/{MAX_PERFORMER_RETRIES})",
+                    context={"agent_name": agent_name, "action_type": action_type},
+                )
+                content = None
+                continue
+
+            # Canonicalize the candidate text before stance validation so the
+            # classifier sees the same message that would be published.
+            candidate_content = deanonymize_text(content, self._reverse_map)
+
+            if action_type == "reply" and target_message:
+                candidate_content = _strip_target_quote_echo(candidate_content, target_message)
+
+            if action_type == "@mention" and target_user:
+                candidate_content = re.sub(
+                    r"^@?" + re.escape(target_user) + r"\s*",
+                    "",
+                    candidate_content,
+                ).strip()
+
+            if self.humanize_output:
+                from utils.humanizer import humanize as _humanize
+                if agent_name in self.humanize_per_agent:
+                    r = self.humanize_per_agent[agent_name]
+                else:
+                    r = self.humanize_rules
+                candidate_content = _humanize(
+                    candidate_content,
+                    strip_hashtags=int(r.get("strip_hashtags", 100)),
+                    strip_inverted_punct=int(r.get("strip_inverted_punct", 100)),
+                    word_subs=int(r.get("word_subs", 80)),
+                    drop_accents=int(r.get("drop_accents", 40)),
+                    comma_spacing=int(r.get("comma_spacing", 50)),
+                    max_emoji=int(r.get("max_emoji", 1)),
+                )
+
+            candidate_mentions = None
+            candidate_reply_to = None
+            candidate_quoted_text = None
+
+            if action_type == "@mention" and target_user:
+                candidate_content = f"@{target_user} {candidate_content}"
+                candidate_mentions = [target_user]
+            elif action_type == "reply" and target_message_id:
+                candidate_reply_to = target_message_id
+                if target_message:
+                    candidate_quoted_text = target_message.content
+
+            classification = await self._classify_message(agent_message=candidate_content)
+            if self._message_contradicts_fixed_stance(agent_name, classification):
+                expected_like_minded = self._expected_like_minded_for_agent(agent_name)
+                actual_like_minded = classification.get("is_like_minded")
+                if stance_retry_count < MAX_STANCE_RETRIES:
+                    stance_retry_count += 1
+                    self.logger.log_error(
+                        "performer_stance_mismatch_retry",
+                        f"Generated message contradicted fixed stance for '{agent_name}'; retrying once",
+                        context={
+                            "expected_like_minded": expected_like_minded,
+                            "actual_like_minded": actual_like_minded,
+                            "action_type": action_type,
+                        },
+                    )
+                    performer_user_prompt = (
+                        f"{base_performer_user_prompt}\n\n"
+                        "Important correction:\n"
+                        "Your last draft contradicted your fixed stance on the topic.\n"
+                        "Rewrite it so it clearly stays ideologically consistent with your fixed position, "
+                        "while keeping the same action type, target, tone, and overall objective.\n"
+                        "Do not hedge or sound neutral if that would blur your stance."
+                    )
+                    content = None
+                    continue
+
+                self.logger.log_error(
+                    "performer_stance_mismatch_exhausted",
+                    f"Generated message for '{agent_name}' still contradicted fixed stance after retry; skipping turn",
+                    context={
+                        "expected_like_minded": expected_like_minded,
+                        "actual_like_minded": actual_like_minded,
+                        "action_type": action_type,
+                    },
+                )
+                content = None
+                break
+
+            content = candidate_content
+            mentions = candidate_mentions
+            reply_to = candidate_reply_to
+            quoted_text = candidate_quoted_text
+            break
 
         if content is None:
             self.logger.log_error(
@@ -846,53 +1123,6 @@ class Orchestrator:
                 action_rationale=action_rationale,
             )
 
-        # 6. Deanonymize any anonymous labels in the generated content.
-        content = deanonymize_text(content, self._reverse_map)
-
-        if action_type == "reply" and target_message:
-            content = _strip_target_quote_echo(content, target_message)
-
-        # 6b. Strip any @mention prefix the Performer included — the
-        #     Orchestrator adds it canonically below, so duplicates must go.
-        if action_type == "@mention" and target_user:
-            content = re.sub(
-                r"^@?" + re.escape(target_user) + r"\s*",
-                "",
-                content,
-            ).strip()
-
-        # 6c. Optional post-processing humanization (informal typos, no hashtags…)
-        if self.humanize_output:
-            from utils.humanizer import humanize as _humanize
-            # Use per-agent rules if an override exists for this agent, regardless of humanize_mode.
-            if agent_name in self.humanize_per_agent:
-                r = self.humanize_per_agent[agent_name]
-            else:
-                r = self.humanize_rules
-            content = _humanize(
-                content,
-                strip_hashtags=int(r.get("strip_hashtags", 100)),
-                strip_inverted_punct=int(r.get("strip_inverted_punct", 100)),
-                word_subs=int(r.get("word_subs", 80)),
-                drop_accents=int(r.get("drop_accents", 40)),
-                comma_spacing=int(r.get("comma_spacing", 50)),
-                max_emoji=int(r.get("max_emoji", 1)),
-            )
-
-        # 7. Format the output into a Message
-        mentions = None
-        reply_to = None
-        quoted_text = None
-
-        if action_type == "@mention" and target_user:
-            content = f"@{target_user} {content}"
-            mentions = [target_user]
-        elif action_type == "reply" and target_message_id:
-            reply_to = target_message_id
-            if target_message:
-                quoted_text = target_message.content
-
-        classification = await self._classify_message(agent_message=content)
 
         message = Message.create(
             sender=agent_name,

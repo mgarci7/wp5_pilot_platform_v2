@@ -114,7 +114,8 @@ class TestBuildPerformerUserPrompt:
             agent_profile="Active user.",
             action_type="message",
         )
-        assert "not responding to anyone" in result.lower()
+        assert "genuinely not responding to any specific previous message" in result
+        assert "do not default to addressing the whole room in general" in result.lower()
 
     def test_message_targeted(self):
         target = _msg(sender="Bob", content="Interesting point")
@@ -156,7 +157,7 @@ class TestBuildPerformerUserPrompt:
             action_type="message",
             chatroom_context="Climate debate",
         )
-        assert "Climate debate" in result
+        assert "Climate debate" not in result
 
     def test_renders_action_type_block(self):
         result = build_performer_user_prompt(
@@ -183,7 +184,7 @@ class TestBuildPerformerUserPrompt:
         assert "Bob" in result
         assert "Hey there" in result
         # Should NOT include standalone message block
-        assert "not responding to anyone" not in result.lower()
+        assert "genuinely not responding to any specific previous message" not in result
 
     def test_includes_recent_room_messages_from_other_people(self):
         result = build_performer_user_prompt(

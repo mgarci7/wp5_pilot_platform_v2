@@ -60,7 +60,7 @@ Action-specific instructions will be provided in the user message.
 
 {#USER}
 {#ACTION_TYPE: message}
-Post a new message to the chatroom. Address the room in general - only use this when you have something new to add that is not a direct response to any specific previous message.
+Post a new message only if you are genuinely not responding to any specific previous message. Do not default to addressing the whole room in general - if your message feels like a reaction to someone, it should read like a natural continuation of the conversation rather than a broad announcement.
 {/ACTION_TYPE}
 
 {#ACTION_TYPE: message_targeted}

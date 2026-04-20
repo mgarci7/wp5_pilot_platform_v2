@@ -70,7 +70,12 @@ def _drop_accents(text: str, rng: random.Random, prob: float = 0.40) -> str:
 
 
 def _strip_excess_emoji(text: str, rng: random.Random, max_emoji: int = 1) -> str:
-    """Keep at most `max_emoji` emoji characters; remove the rest."""
+    """Keep at most `max_emoji` individual emoji; remove the rest.
+
+    Each emoji codepoint is matched separately (no + quantifier) so clusters
+    like 😂😂😂 are counted and trimmed correctly.
+    """
+    # Match one emoji codepoint at a time (no trailing +)
     emoji_pattern = re.compile(
         "[\U00010000-\U0010ffff"
         "\U00002702-\U000027B0"
@@ -78,13 +83,12 @@ def _strip_excess_emoji(text: str, rng: random.Random, max_emoji: int = 1) -> st
         "\U0001F300-\U0001F5FF"
         "\U0001F680-\U0001F6FF"
         "\U0001F1E0-\U0001F1FF"
-        "]+",
+        "]",
         flags=re.UNICODE,
     )
     emojis = emoji_pattern.findall(text)
     if len(emojis) <= max_emoji:
         return text
-    # Keep only the first emoji occurrence
     kept = 0
     def _replacer(m):
         nonlocal kept

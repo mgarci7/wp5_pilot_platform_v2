@@ -513,7 +513,16 @@ function OverviewTab({
                                     key={row.token}
                                     className="flex items-center justify-between gap-2 rounded-lg border border-admin-border bg-admin-surface px-2.5 py-1.5"
                                   >
-                                    <span className="font-mono text-[11px] text-admin-text break-all">{row.token}</span>
+                                    <div className="min-w-0 flex items-center gap-2">
+                                      <span className="font-mono text-[11px] text-admin-text break-all">{row.token}</span>
+                                      <button
+                                        onClick={() => copyText(row.token, row.token)}
+                                        className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded border border-admin-border text-admin-text hover:bg-admin-raised transition-colors"
+                                        title={`Copy token ${row.token}`}
+                                      >
+                                        {copiedLabel === row.token ? "Copied" : "Copy"}
+                                      </button>
+                                    </div>
                                     <span
                                       className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
                                         row.used

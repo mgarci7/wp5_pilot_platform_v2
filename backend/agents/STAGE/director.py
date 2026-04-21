@@ -106,6 +106,8 @@ def format_participant_hint(participant_stance_hint: Optional[str]) -> str:
     labels = {
         "favor": "participant self-report: in favor of the article",
         "against": "participant self-report: against the article",
+        "qualified_favor": "participant self-report: broadly in favor of the article's direction, but with important reservations about the specific measure",
+        "qualified_against": "participant self-report: broadly against the measure as framed, but not necessarily aligned with the opposite ideological camp",
         "skeptical": "participant self-report: skeptical / unsure about the article",
     }
     return labels.get(participant_stance_hint, f"participant self-report: {participant_stance_hint}")

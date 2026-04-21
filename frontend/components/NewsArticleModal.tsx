@@ -40,6 +40,8 @@ export default function NewsArticleModal({
   const stanceLabels: Record<NonNullable<ParticipantStance>, string> = {
     favor: "In favor",
     against: "Against",
+    qualified_favor: "In favor, but with important reservations",
+    qualified_against: "Against, but not aligned with the opposite side",
     skeptical: "Skeptical / unsure",
   }
   const currentStance = selectedStance || participantStance
@@ -120,7 +122,9 @@ export default function NewsArticleModal({
                 Select one option
               </option>
               <option value="favor">In favor</option>
+              <option value="qualified_favor">In favor, but this measure is flawed / insufficient</option>
               <option value="against">Against</option>
+              <option value="qualified_against">Against, but not for the usual opposite-side reasons</option>
               <option value="skeptical">Skeptical / unsure</option>
             </select>
             <p className="text-xs text-secondary">

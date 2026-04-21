@@ -46,6 +46,8 @@ Read the performer profiles and participation counts below. Which performer is b
 
 **Operational rule:** If the participant is against the article/measure, a `ideology=right` performer is like-minded; an `ideology=left` performer is not-like-minded. If the participant is in favor, the mapping reverses. Always reason from alignment with the participant first, then from the article position.
 
+**Qualified participant stances:** If the participant self-report says they are only *qualifiedly* in favor or against (for example, they support the general goal but think this specific measure is too weak, or they reject this measure without sharing the opposite camp's whole worldview), keep the treatment mapping on the same broad side (`qualified_favor` counts with favor, `qualified_against` counts with against). But when choosing performers, prefer disagreement that is close to the participant's frame before jumping to the hardest ideological opposition. In those cases, a good `not-like-minded` choice often disagrees about the adequacy, realism, or design of the measure rather than rejecting the whole underlying goal.
+
 {#USER}
 {AGENT_PROFILES}
 
@@ -64,12 +66,12 @@ Read the recent chat log and current action distribution below. What action type
 
 Select exactly one action type:
 
-- `message`: A standalone new message to the chatroom (target_user=null). Only use this for a performer's **first** message of the session, or when they genuinely have something new to say that is not a reaction to any specific previous message. Do not use it if the performer has already posted — prefer `reply`, `@mention`, or `like` instead. A targeted response to the most recent message can also use `message` with target_user=X; no quote-reply or @mention is needed because the sequential ordering makes the target clear.
+- `message`: A standalone new message to the chatroom (target_user=null). Treat this as a last resort, not a default action. Only use it for a performer's **first** message of the session, or when they genuinely have something new to say that is not a reaction to any specific previous message. Do not use it if the performer has already posted — prefer `reply`, `@mention`, or `like` instead. A targeted response to the most recent message can also use `message` with target_user=X; no quote-reply or @mention is needed because the sequential ordering makes the target clear.
 - `reply`: A quote-reply to a specific earlier message that is NOT the most recent. Use only when the performer needs to resurface something from earlier in the conversation. Requires `target_message_id`.
 - `@mention`: A message that @mentions a performer who did NOT send the most recent message. Use only when the performer needs to draw someone specific back into the conversation. Requires `target_user`.
 - `like`: A non-verbal endorsement of a message. Requires `target_message_id`.
 
-**Use non-targeted room messages sparingly:** A `message` with no `target_user` and no `target_message_id` should be rare. If there is a recent person or message the performer can naturally react to, prefer `reply`, `@mention`, `like`, or a targeted `message` to the latest speaker. Reserve a room-wide opener for cases where the performer is truly introducing a fresh angle to the whole room rather than continuing the current thread.
+**Non-targeted room messages are exceptional:** A `message` with no `target_user` and no `target_message_id` should be very rare. If there is any recent person or message the performer can naturally react to, do **not** use a room-wide opener — use `reply`, `@mention`, `like`, or a targeted `message` to the latest speaker instead. Reserve a room-wide opener only for the unusual case where the performer is introducing a genuinely fresh angle to the whole room and no recent message gives a natural anchor.
 
 **Targeted room messages:** If you choose `message` for a performer whose side is currently underrepresented in the treatment, do not leave the brief abstract. Explicitly name who or what they are pushing against (a recent critic, the participant's framing, or a clearly described opposing bloc), and state who they must not validate or echo. Avoid vague instructions like "reinforce your side" with no named target.
 
@@ -86,7 +88,7 @@ Select exactly one action type:
 
 **Reply/mention when not addressing the latest message:** If the performer is responding to someone whose message is NOT the most recent in the chat log, always use `reply` (with `target_message_id`) or `@mention` (with `target_user`) — never a plain `message`. This prevents confusing out-of-context responses.
 
-**If the latest message already gives you a natural anchor, use it:** When the room has a clear active thread, do not break it with a new room-wide opener. Prefer a targeted response to the most recent relevant speaker or message unless the validity priority explicitly requires a fresh whole-room intervention.
+**If the latest message already gives you a natural anchor, use it:** When the room has a clear active thread, treat a new room-wide opener as the wrong choice. Prefer a targeted response to the most recent relevant speaker or message unless there is no plausible anchor at all.
 
 **Variety:** Avoid two consecutive `message` actions from the same agent. If the last action was already a `message`, prefer `like`, `reply`, or `@mention` now.
 

@@ -359,6 +359,10 @@ class Orchestrator:
             return None
 
         stance = str(raw_stance).strip().lower()
+        if stance == "qualified_favor":
+            return "favor"
+        if stance == "qualified_against":
+            return "against"
         if stance in {"favor", "favour", "in favor", "in favour", "support", "pro", "agree"}:
             return "favor"
         if stance in {"against", "oppose", "anti", "disagree"}:

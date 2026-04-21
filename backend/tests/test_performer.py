@@ -66,17 +66,19 @@ class TestBuildPerformerSystemPrompt:
 
     def test_system_prompt_limits_message_length(self):
         result = build_performer_system_prompt()
-        assert "stop immediately after it" in result
-        assert "most messages should be 1-3 short sentences" in result
+        assert "Only output the chat message" in result
+        assert "write the message itself and stop" in result
+        assert "default to 1-3 short sentences" in result
         assert "Sometimes 4 short sentences are fine" in result
         assert "stay strictly within 2-4 short sentences" in result
-        assert "Very short outbursts are allowed" in result
-        assert "Be creative in phrasing" in result
-        assert "Avoid cross-agent repetition" in result
-        assert "Anchor hostile support" in result
+        assert "Very short outbursts are fine" in result
+        assert "Keep the same position" in result
+        assert "Sound like Telegram" in result
+        assert "Vary the shape" in result
+        assert "Be creative but natural" in result
+        assert "If you are hostile, aim it clearly" in result
         assert "Do not sound furious at nobody in particular" in result
-        assert "Civil is not formal" in result
-        assert "Avoid robotic framing" in result
+        assert "Keep punctuation light" in result
 
 
 # ── build_performer_user_prompt ────────────────────────────────────────────

@@ -145,7 +145,9 @@ app.add_middleware(
 class SessionStartRequest(BaseModel):
     token: str
     participant_name: Optional[str] = None
-    participant_stance: Optional[Literal["favor", "against", "skeptical"]] = None
+    participant_stance: Optional[
+        Literal["favor", "against", "qualified_favor", "qualified_against", "skeptical"]
+    ] = None
 
 
 class SessionStartResponse(BaseModel):
@@ -154,7 +156,9 @@ class SessionStartResponse(BaseModel):
 
 
 class ParticipantStanceUpdateRequest(BaseModel):
-    participant_stance: Literal["favor", "against", "skeptical"]
+    participant_stance: Literal[
+        "favor", "against", "qualified_favor", "qualified_against", "skeptical"
+    ]
 
 
 class LikeRequest(BaseModel):

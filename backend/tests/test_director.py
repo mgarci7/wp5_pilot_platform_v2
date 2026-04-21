@@ -114,6 +114,11 @@ class TestFormatParticipantHint:
         result = format_participant_hint("favor")
         assert "in favor" in result
 
+    def test_qualified_favor_hint(self):
+        result = format_participant_hint("qualified_favor")
+        assert "broadly in favor" in result
+        assert "specific measure" in result
+
 
 class TestFormatTreatmentFidelitySummary:
     def test_empty_messages(self):
@@ -153,6 +158,17 @@ class TestBuildActionSystemPrompt:
         assert "If the participant is against the article" in prompt
         assert "Always reason from alignment with the participant first" in prompt
 
+    def test_handles_qualified_participant_stances_without_changing_agent_fixed_sides(self):
+        prompt = build_action_system_prompt(
+            chatroom_context="Debate climatico",
+            participant_stance_hint="participant self-report: broadly in favor of the article's direction, but with important reservations about the specific measure",
+            participant_name="Martin",
+        )
+        assert "Qualified participant stances" in prompt
+        assert "`qualified_favor` counts with favor" in prompt
+        assert "prefer disagreement that is close to the participant's frame" in prompt
+        assert "adequacy, realism, or design of the measure" in prompt
+
     def test_requires_targeted_room_messages_to_name_opposition_and_non_validation(self):
         prompt = build_action_system_prompt(
             chatroom_context="Debate migratorio",
@@ -170,9 +186,10 @@ class TestBuildActionSystemPrompt:
             participant_stance_hint="participant self-report: against the article",
             participant_name="Martin",
         )
-        assert "Use non-targeted room messages sparingly" in prompt
+        assert "Non-targeted room messages are exceptional" in prompt
+        assert "Treat this as a last resort, not a default action" in prompt
         assert "If the latest message already gives you a natural anchor, use it" in prompt
-        assert "do not break it with a new room-wide opener" in prompt
+        assert "treat a new room-wide opener as the wrong choice" in prompt
 
 
 # ── parse_update_response — valid inputs ─────────────────────────────────────

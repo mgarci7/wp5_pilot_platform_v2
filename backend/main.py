@@ -14,11 +14,12 @@ from fastapi import FastAPI, Header, WebSocket, WebSocketDisconnect, HTTPExcepti
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 load_dotenv()
 
 from platforms import SimulationSession
+from platforms.chatroom import _parse_target_percentage
 from models import Message
 from utils.session_manager import session_manager
 from utils import token_manager
@@ -28,6 +29,13 @@ from db import connection as db_conn
 from cache import redis_client
 from db.repositories import message_repo, session_repo, event_repo, config_repo, token_repo
 from features import AVAILABLE_FEATURES, FEATURES_META
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _parse_iso_datetime(raw: str) -> datetime:
+    """Parse an ISO-8601 datetime string, handling the Z suffix."""
+    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -570,7 +578,7 @@ async def session_messages_csv(session_id: str):
         Message(
             sender=msg["sender"],
             content=msg["content"],
-            timestamp=datetime.fromisoformat(msg["timestamp"].replace("Z", "+00:00")),
+            timestamp=_parse_iso_datetime(msg["timestamp"]),
             message_id=msg["message_id"],
             reply_to=msg.get("reply_to"),
             quoted_text=msg.get("quoted_text"),
@@ -669,45 +677,16 @@ def _find_dotenv_path() -> Optional[str]:
     return os.path.abspath(candidates[0])
 
 
-def _read_dotenv_lines(path: str) -> list[str]:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.readlines()
-    except FileNotFoundError:
-        return []
-
 
 def _write_env_var(var: str, value: str) -> None:
     """Write or update a single env var in the .env file and os.environ.
 
+    Uses python-dotenv's set_key for atomic, correct parsing.
     Security: value is written directly to disk — never logged or returned.
     """
     path = _find_dotenv_path()
-    lines = _read_dotenv_lines(path)
-
-    # Replace existing line if present, otherwise append.
-    found = False
-    new_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith(f"{var}=") or stripped.startswith(f"{var} ="):
-            new_lines.append(f"{var}={value}\n")
-            found = True
-        else:
-            new_lines.append(line)
-
-    if not found:
-        # Add a blank line before if file doesn't end with one.
-        if new_lines and not new_lines[-1].endswith("\n\n"):
-            if new_lines[-1].strip():
-                new_lines.append("\n")
-        new_lines.append(f"{var}={value}\n")
-
-    with open(path, "w", encoding="utf-8") as f:
-        f.writelines(new_lines)
-
-    # Also update the live process environment so the change takes effect
-    # immediately without requiring a container restart.
+    # set_key creates the file if it doesn't exist and handles quoting correctly.
+    set_key(path, var, value, quote_mode="never")
     os.environ[var] = value
 
 
@@ -991,12 +970,12 @@ async def admin_save_config(body: dict, x_admin_key: str = Header(None)):
     raw_ends = body.get("ends_at")
     if raw_starts:
         try:
-            starts_at = datetime.fromisoformat(raw_starts.replace("Z", "+00:00"))
+            starts_at = _parse_iso_datetime(raw_starts)
         except (ValueError, AttributeError):
             raise HTTPException(status_code=422, detail="Invalid starts_at datetime")
     if raw_ends:
         try:
-            ends_at = datetime.fromisoformat(raw_ends.replace("Z", "+00:00"))
+            ends_at = _parse_iso_datetime(raw_ends)
         except (ValueError, AttributeError):
             raise HTTPException(status_code=422, detail="Invalid ends_at datetime")
     if starts_at and ends_at and ends_at <= starts_at:
@@ -1051,12 +1030,12 @@ async def admin_update_config(experiment_id: str, body: dict, x_admin_key: str =
     raw_ends = body.get("ends_at")
     if raw_starts:
         try:
-            starts_at = datetime.fromisoformat(raw_starts.replace("Z", "+00:00"))
+            starts_at = _parse_iso_datetime(raw_starts)
         except (ValueError, AttributeError):
             raise HTTPException(status_code=422, detail="Invalid starts_at datetime")
     if raw_ends:
         try:
-            ends_at = datetime.fromisoformat(raw_ends.replace("Z", "+00:00"))
+            ends_at = _parse_iso_datetime(raw_ends)
         except (ValueError, AttributeError):
             raise HTTPException(status_code=422, detail="Invalid ends_at datetime")
     if starts_at and ends_at and ends_at <= starts_at:
@@ -1768,6 +1747,19 @@ async def admin_evaluations_summary_csv(experiment_id: str, x_admin_key: str = H
     if not experiment:
         raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
 
+    # Build a per-group targets map from the actual validity criteria config
+    # so compliance calculation doesn't depend on group name conventions.
+    exp_config = await config_repo.get_experiment_config(pool, experiment_id)
+    _group_targets: dict[str, tuple[Optional[int], Optional[int]]] = {}
+    if exp_config:
+        groups_cfg = (exp_config.get("experimental") or {}).get("groups") or {}
+        for grp_name, grp_cfg in groups_cfg.items():
+            criteria = grp_cfg.get("internal_validity_criteria", "")
+            _group_targets[grp_name] = (
+                _parse_target_percentage(criteria, "INCIVILITY_TARGET", -1) if criteria else None,
+                _parse_target_percentage(criteria, "LIKEMINDED_TARGET", -1) if criteria else None,
+            )
+
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -1810,25 +1802,12 @@ async def admin_evaluations_summary_csv(experiment_id: str, x_admin_key: str = H
         return f"{(value / total) * 100:.1f}%" if total > 0 else ""
 
     def _expected_targets_from_treatment(treatment_group: str) -> tuple[Optional[int], Optional[int]]:
-        group = (treatment_group or "").lower()
-
-        expected_incivility: Optional[int] = None
-        if "not_incivil" in group:
-            expected_incivility = 0
-        elif "incivil" in group:
-            expected_incivility = 100
-        elif "mix" in group:
-            expected_incivility = 50
-
-        expected_like_minded: Optional[int] = None
-        if "not_like_minded" in group:
-            expected_like_minded = 0
-        elif "like_minded" in group:
-            expected_like_minded = 100
-        elif "mix" in group:
-            expected_like_minded = 50
-
-        return expected_incivility, expected_like_minded
+        incivility, like_minded = _group_targets.get(treatment_group, (None, None))
+        # -1 means the key was absent from criteria; treat as unknown
+        return (
+            incivility if incivility != -1 else None,
+            like_minded if like_minded != -1 else None,
+        )
 
     def _compliance(actual_value: int, total: int, expected_pct: Optional[int]) -> str:
         if total <= 0 or expected_pct is None:

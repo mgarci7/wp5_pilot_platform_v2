@@ -1,6 +1,8 @@
 import asyncio
 from typing import Optional
 
+LLM_TIMEOUT_SECONDS = 60
+
 
 def _tune_bsc_generation_params(
     provider: str,
@@ -131,16 +133,18 @@ class LLMManager:
     async def generate_response(self, prompt: str, max_retries: int = 1, system_prompt: str = None) -> Optional[str]:
         """Delegate to the LLM client's async generator.
 
-        Returns the response text or None on failure.
+        Returns the response text or None on failure or timeout.
         """
         try:
-            # type: ignore[attr-defined]
-            return await self.client.generate_response_async(prompt, max_retries=max_retries, system_prompt=system_prompt)
-        except AttributeError:
-            # Fallback: maybe client only exposes sync API
-            # run the sync call in a threadpool
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, lambda: self.client.generate_response(prompt, max_retries=max_retries, system_prompt=system_prompt))
+            try:
+                coro = self.client.generate_response_async(prompt, max_retries=max_retries, system_prompt=system_prompt)  # type: ignore[attr-defined]
+            except AttributeError:
+                loop = asyncio.get_running_loop()
+                coro = loop.run_in_executor(None, lambda: self.client.generate_response(prompt, max_retries=max_retries, system_prompt=system_prompt))
+            return await asyncio.wait_for(coro, timeout=LLM_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            print(f"[LLMManager] generate_response timed out after {LLM_TIMEOUT_SECONDS}s")
+            return None
         except Exception as e:
             print(f"[LLMManager] generate_response failed: {type(e).__name__}: {e}")
             return None

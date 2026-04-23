@@ -180,6 +180,20 @@ export async function resumeExperiment(
   return res.json()
 }
 
+export async function stopSession(
+  key: string,
+  sessionId: string,
+): Promise<{ status: string; session_id: string }> {
+  const res = await adminFetch(`/admin/session/${encodeURIComponent(sessionId)}/stop`, key, {
+    method: "POST",
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Stop failed" }))
+    throw new Error(err.detail || "Stop failed")
+  }
+  return res.json()
+}
+
 export async function generateTokens(
   key: string,
   participantsPerGroup: number,

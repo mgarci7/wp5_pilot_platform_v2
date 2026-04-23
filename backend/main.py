@@ -1243,6 +1243,17 @@ async def admin_list_experiments(x_admin_key: str = Header(None)):
     }
 
 
+@app.post("/admin/session/{session_id}/stop")
+async def admin_stop_session(session_id: str, x_admin_key: str = Header(None)):
+    """Stop a single active session immediately."""
+    _require_admin(x_admin_key)
+    session = await session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found or already stopped")
+    await session.stop(reason="admin_stopped")
+    return {"status": "stopped", "session_id": session_id}
+
+
 @app.post("/admin/reset-sessions")
 async def admin_reset_sessions(
     body: Dict[str, Any] = None,

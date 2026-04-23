@@ -15,6 +15,7 @@ import {
   resumeExperiment,
   downloadSessionsCSV,
   downloadSessionBundle,
+  stopSession,
   getComplianceStats,
   getProviderKeys,
   setProviderKey,
@@ -1452,6 +1453,8 @@ function SessionTable({
 }) {
   const [downloadingSessionId, setDownloadingSessionId] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState("")
+  const [stoppingSessionId, setStoppingSessionId] = useState<string | null>(null)
+  const [stopError, setStopError] = useState("")
 
   if (sessions.length === 0) return null
 
@@ -1467,14 +1470,27 @@ function SessionTable({
     }
   }
 
+  const handleStopSession = async (sessionId: string) => {
+    if (!confirm(`Stop session ${sessionId.slice(0, 8)}…? This cannot be undone.`)) return
+    setStoppingSessionId(sessionId)
+    setStopError("")
+    try {
+      await stopSession(adminKey, sessionId)
+    } catch (err) {
+      setStopError(err instanceof Error ? err.message : "Stop failed")
+    } finally {
+      setStoppingSessionId(null)
+    }
+  }
+
   return (
     <div className="bg-admin-surface rounded-lg border border-admin-border overflow-hidden">
       <div className="px-3 py-2 border-b border-admin-border">
         <h4 className="text-xs font-semibold text-admin-muted">{title}</h4>
       </div>
-      {downloadError && (
+      {(downloadError || stopError) && (
         <div className="px-3 py-2 border-b border-admin-border text-[11px] text-red-600">
-          {downloadError}
+          {downloadError || stopError}
         </div>
       )}
       <div className="overflow-x-auto">
@@ -1516,6 +1532,15 @@ function SessionTable({
                     >
                       View
                     </a>
+                    {!showEndReason && (
+                      <button
+                        onClick={() => handleStopSession(s.session_id)}
+                        disabled={stoppingSessionId === s.session_id}
+                        className="text-red-500 hover:text-red-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {stoppingSessionId === s.session_id ? "Stopping…" : "Stop"}
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

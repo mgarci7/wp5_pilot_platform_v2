@@ -1095,49 +1095,57 @@ class Orchestrator:
                 if target_message:
                     candidate_quoted_text = target_message.content
 
-            classification = await self._classify_message(agent_message=candidate_content)
-            if self._message_contradicts_fixed_stance(agent_name, classification):
-                expected_like_minded = self._expected_like_minded_for_agent(agent_name)
-                actual_like_minded = classification.get("is_like_minded")
-                if stance_retry_count < MAX_STANCE_RETRIES:
-                    stance_retry_count += 1
+            # Stance guard: only classify when a fixed-stance check is possible,
+            # to avoid burning tokens on messages that will be discarded anyway.
+            # Classification for the final approved message happens after the loop.
+            if self._expected_like_minded_for_agent(agent_name) is not None:
+                pre_classification = await self._classify_message(agent_message=candidate_content)
+                if self._message_contradicts_fixed_stance(agent_name, pre_classification):
+                    expected_like_minded = self._expected_like_minded_for_agent(agent_name)
+                    actual_like_minded = pre_classification.get("is_like_minded")
+                    if stance_retry_count < MAX_STANCE_RETRIES:
+                        stance_retry_count += 1
+                        self.logger.log_error(
+                            "performer_stance_mismatch_retry",
+                            f"Generated message contradicted fixed stance for '{agent_name}'; retrying once",
+                            context={
+                                "expected_like_minded": expected_like_minded,
+                                "actual_like_minded": actual_like_minded,
+                                "action_type": action_type,
+                            },
+                        )
+                        performer_user_prompt = (
+                            f"{base_performer_user_prompt}\n\n"
+                            "Important correction:\n"
+                            "Your last draft contradicted your fixed stance on the topic.\n"
+                            "Rewrite it so it clearly stays ideologically consistent with your fixed position, "
+                            "while keeping the same action type, target, tone, and overall objective.\n"
+                            "Do not hedge or sound neutral if that would blur your stance."
+                        )
+                        content = None
+                        continue
+
                     self.logger.log_error(
-                        "performer_stance_mismatch_retry",
-                        f"Generated message contradicted fixed stance for '{agent_name}'; retrying once",
+                        "performer_stance_mismatch_exhausted",
+                        f"Generated message for '{agent_name}' still contradicted fixed stance after retry; skipping turn",
                         context={
                             "expected_like_minded": expected_like_minded,
                             "actual_like_minded": actual_like_minded,
                             "action_type": action_type,
                         },
                     )
-                    performer_user_prompt = (
-                        f"{base_performer_user_prompt}\n\n"
-                        "Important correction:\n"
-                        "Your last draft contradicted your fixed stance on the topic.\n"
-                        "Rewrite it so it clearly stays ideologically consistent with your fixed position, "
-                        "while keeping the same action type, target, tone, and overall objective.\n"
-                        "Do not hedge or sound neutral if that would blur your stance."
-                    )
                     content = None
-                    continue
-
-                self.logger.log_error(
-                    "performer_stance_mismatch_exhausted",
-                    f"Generated message for '{agent_name}' still contradicted fixed stance after retry; skipping turn",
-                    context={
-                        "expected_like_minded": expected_like_minded,
-                        "actual_like_minded": actual_like_minded,
-                        "action_type": action_type,
-                    },
-                )
-                content = None
-                break
+                    break
 
             content = candidate_content
             mentions = candidate_mentions
             reply_to = candidate_reply_to
             quoted_text = candidate_quoted_text
             break
+
+        # Classify the final approved message once, outside the retry loop.
+        if content is not None:
+            classification = await self._classify_message(agent_message=content)
 
         if content is None:
             self.logger.log_error(

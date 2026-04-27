@@ -344,8 +344,12 @@ class Orchestrator:
 
         actor_traits = self._agent_traits.get(actor_name) or {}
         target_traits = self._agent_traits.get(target_name) or {}
-        actor_ideology = self._normalize_agent_ideology(actor_traits.get("ideology"))
-        target_ideology = self._normalize_agent_ideology(target_traits.get("ideology"))
+        actor_ideology = self._normalize_agent_ideology(
+            actor_traits.get("ideology") or actor_traits.get("stance")
+        )
+        target_ideology = self._normalize_agent_ideology(
+            target_traits.get("ideology") or target_traits.get("stance")
+        )
         return (
             actor_ideology is not None
             and actor_ideology != "center"
@@ -369,6 +373,43 @@ class Orchestrator:
             return "against"
         if stance in {"skeptical", "skeptic", "unsure", "neutral", "mixed"}:
             return "skeptical"
+
+        # Classifier summaries are free text ("supports regularization but..."),
+        # not canonical enum values, so fall back to simple keyword heuristics.
+        normalized = stance.replace("_", " ").replace("-", " ")
+        favor_match = bool(re.search(
+            r"\b("
+            r"favor|favour|in favor|in favour|support|supports|supported|supportive|"
+            r"pro|agree|agrees|agreed|backs?|backed|apoya|apoya la|a favor|"
+            r"regulari[sz]ation"
+            r")\b",
+            normalized,
+        ))
+        against_match = bool(re.search(
+            r"\b("
+            r"against|oppose|opposes|opposed|opposition|anti|disagree|disagrees|"
+            r"reject|rejects|rejected|critical of|criticizes|criticises|"
+            r"en contra|se opone|opone|rechaza"
+            r")\b",
+            normalized,
+        ))
+        skeptical_match = bool(re.search(
+            r"\b("
+            r"skeptical|skeptic|unsure|unclear|mixed|neutral|ambivalent|"
+            r"doubt|doubts|doubtful|uncertain|concerned|reservations?|"
+            r"esc[eé]ptic|duda|dudas|reservas?"
+            r")\b",
+            normalized,
+        ))
+
+        if favor_match and against_match:
+            return "skeptical"
+        if favor_match:
+            return "favor"
+        if against_match:
+            return "against"
+        if skeptical_match:
+            return "skeptical"
         return None
 
     def _expected_like_minded_for_agent(self, agent_name: str) -> Optional[bool]:
@@ -382,7 +423,9 @@ class Orchestrator:
             return None
 
         traits = self._agent_traits.get(agent_name) or {}
-        agent_ideology = self._normalize_agent_ideology(traits.get("ideology"))
+        agent_ideology = self._normalize_agent_ideology(
+            traits.get("ideology") or traits.get("stance")
+        )
         if agent_ideology is None or agent_ideology == "center":
             return None
 

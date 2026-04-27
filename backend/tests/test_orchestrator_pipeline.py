@@ -862,6 +862,13 @@ class TestFixedStanceGuard:
                     "inferred_participant_stance": "against",
                     "rationale": "Aligned",
                 }),
+                json.dumps({
+                    "is_incivil": True,
+                    "is_like_minded": True,
+                    "stance_confidence": "high",
+                    "inferred_participant_stance": "against",
+                    "rationale": "Aligned",
+                }),
             ]
         )
 
@@ -966,6 +973,46 @@ class TestFixedStanceGuard:
         assert result is not None
         assert result.action_type == "message"
         assert result.message.content == "Este plan es necesario y justo."
+        assert orch.performer_llm.generate_response.call_count == 1
+        assert not any(
+            call.args and call.args[0] == "performer_stance_mismatch_retry"
+            for call in logger.log_error.call_args_list
+        )
+
+    @pytest.mark.asyncio
+    async def test_free_text_classifier_stance_disagreement_does_not_trigger_retry(self):
+        state = _make_state(participant_stance_hint="qualified_against")
+        orch, logger = _make_orchestrator(
+            state=state,
+            agent_traits={"Alice": {"stance": "disagree", "ideology": "right"}},
+        )
+        anon_alice = orch._name_map["Alice"]
+
+        orch.director_llm.generate_response = AsyncMock(
+            return_value=_action_json(next_performer=anon_alice, action_type="message")
+        )
+        orch.performer_llm.generate_response = AsyncMock(
+            return_value="Este plan es una vergüenza y hay que frenarlo."
+        )
+        orch.moderator_llm.generate_response = AsyncMock(
+            return_value="Este plan es una vergüenza y hay que frenarlo."
+        )
+        orch.classifier_llm.generate_response = AsyncMock(
+            return_value=json.dumps({
+                "is_incivil": True,
+                "is_like_minded": False,
+                "stance_confidence": "high",
+                "inferred_participant_stance": "Supports regularization but concerned about racist implementation.",
+                "rationale": "The agent rejects the plan while the participant supports it with reservations.",
+            })
+        )
+
+        result = await orch.execute_turn("criteria_A")
+
+        assert result is not None
+        assert result.action_type == "message"
+        assert result.message is not None
+        assert result.message.is_like_minded is False
         assert orch.performer_llm.generate_response.call_count == 1
         assert not any(
             call.args and call.args[0] == "performer_stance_mismatch_retry"

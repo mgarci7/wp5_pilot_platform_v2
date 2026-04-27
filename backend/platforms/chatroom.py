@@ -257,7 +257,58 @@ class SimulationSession:
         self._ws_send_fn: Optional[Callable] = None
         self._subscriber_task: Optional[asyncio.Task] = None
 
-        orchestrator = Orchestrator(
+        self.features = load_features(self.experimental_config)
+
+        # websocket_send kept for the blocking-wrapper logic used during attach.
+        self._raw_ws_send = websocket_send or self._noop_send
+        # Expose a wrapped send for callers that still need direct delivery
+        # (e.g. scenario seed before pub/sub subscriber is up).
+        self.websocket_send = self._wrap_send(self._raw_ws_send)
+
+        self.clock_task: Optional[asyncio.Task] = None
+        self.running = False
+        self._seeded = False
+        self._turn_lock = asyncio.Lock()   # serialises the persist+broadcast phase
+        self._parallel_turns = max(1, int(self.simulation_config.get("parallel_turns", 1)))
+        self._active_turn_tasks: set = set()  # track fire-and-forget parallel tasks
+        self._next_pipeline_id = 0  # cycles 1..N for parallel pipeline tagging
+
+        # Pre-split agents across pipeline slots so each director only picks
+        # from its own subset, avoiding duplicate agent selection.
+        if self._parallel_turns > 1:
+            self._pipeline_agents: List[List[str]] = [[] for _ in range(self._parallel_turns)]
+            for i, name in enumerate(self._agent_names):
+                self._pipeline_agents[i % self._parallel_turns].append(name)
+        else:
+            self._pipeline_agents = []
+
+        # In parallel mode each pipeline slot gets its own Orchestrator so
+        # Directors can run concurrently without sharing mutable state.
+        # In sequential mode a single orchestrator is used (index 0).
+        self._pipeline_orchestrators: List[Orchestrator] = self._build_pipeline_orchestrators()
+
+        # AgentManager uses publish_event (Redis) for delivery, not direct websocket.
+        # It holds a reference to the first orchestrator for sequential-mode use
+        # and for operations that apply to the whole session (e.g. rebuild_roster).
+        self.agent_manager = AgentManager(
+            state=self.state,
+            orchestrator=self._pipeline_orchestrators[0],
+            logger=self.logger,
+            session_id=session_id,
+            experiment_id=experiment_id,
+        )
+
+    def _build_orchestrator(self, agent_names_subset: Optional[List[str]] = None) -> Orchestrator:
+        """Instantiate a single Orchestrator for the current session config.
+
+        ``agent_names_subset`` is only used in parallel mode to filter which
+        agents' traits are visible to this pipeline's Director.
+        """
+        traits = self._agent_traits if self._agent_mode == "pool" else None
+        if traits and agent_names_subset is not None:
+            traits = {k: v for k, v in traits.items() if k in set(agent_names_subset)}
+
+        orc = Orchestrator(
             director_llm=self.director_llm,
             performer_llm=self.performer_llm,
             moderator_llm=self.moderator_llm,
@@ -289,45 +340,25 @@ class SimulationSession:
             },
             humanize_mode=self.simulation_config.get("humanize_mode", "general"),
             humanize_per_agent=self.simulation_config.get("humanize_per_agent") or {},
-            agent_traits=self._agent_traits if self._agent_mode == "pool" else None,
+            agent_traits=traits,
             rng=self._rng,
         )
-        orchestrator.set_participant_stance_hint(self.participant_stance_hint)
+        orc.set_participant_stance_hint(self.participant_stance_hint)
+        return orc
 
-        self.features = load_features(self.experimental_config)
+    def _build_pipeline_orchestrators(self) -> List[Orchestrator]:
+        """Build one Orchestrator per pipeline slot.
 
-        # AgentManager uses publish_event (Redis) for delivery, not direct websocket.
-        self.agent_manager = AgentManager(
-            state=self.state,
-            orchestrator=orchestrator,
-            logger=self.logger,
-            session_id=session_id,
-            experiment_id=experiment_id,
-        )
-
-        # websocket_send kept for the blocking-wrapper logic used during attach.
-        self._raw_ws_send = websocket_send or self._noop_send
-        # Expose a wrapped send for callers that still need direct delivery
-        # (e.g. scenario seed before pub/sub subscriber is up).
-        self.websocket_send = self._wrap_send(self._raw_ws_send)
-
-        self.clock_task: Optional[asyncio.Task] = None
-        self.running = False
-        self._seeded = False
-        self._turn_lock = asyncio.Lock()   # serialises the persist+broadcast phase
-        self._director_lock = asyncio.Lock()  # serialises the Director phase so each pipeline reads fresh state
-        self._parallel_turns = max(1, int(self.simulation_config.get("parallel_turns", 1)))
-        self._active_turn_tasks: set = set()  # track fire-and-forget parallel tasks
-        self._next_pipeline_id = 0  # cycles 1..N for parallel pipeline tagging
-
-        # Pre-split agents across pipeline slots so each director only picks
-        # from its own subset, avoiding duplicate agent selection.
-        if self._parallel_turns > 1:
-            self._pipeline_agents: List[List[str]] = [[] for _ in range(self._parallel_turns)]
-            for i, name in enumerate(self._agent_names):
-                self._pipeline_agents[i % self._parallel_turns].append(name)
-        else:
-            self._pipeline_agents = []
+        In sequential mode (parallel_turns=1) a single orchestrator is returned.
+        In parallel mode each slot gets its own instance so Directors can run
+        concurrently without sharing mutable per-turn state.
+        """
+        if self._parallel_turns <= 1:
+            return [self._build_orchestrator()]
+        return [
+            self._build_orchestrator(agent_names_subset=self._pipeline_agents[i])
+            for i in range(self._parallel_turns)
+        ]
 
     def _select_pool_agents(
         self,
@@ -478,44 +509,6 @@ class SimulationSession:
         ]
         self.state.agents = agents
 
-        orchestrator = Orchestrator(
-            director_llm=self.director_llm,
-            performer_llm=self.performer_llm,
-            moderator_llm=self.moderator_llm,
-            classifier_llm=self.classifier_llm,
-            state=self.state,
-            logger=self.logger,
-            evaluate_interval=int(self.simulation_config["evaluate_interval"]),
-            action_window_size=int(self.simulation_config.get("action_window_size", 10)),
-            performer_memory_size=int(self.simulation_config.get("performer_memory_size", 3)),
-            chatroom_context=self.chatroom_context,
-            incivility_framework=self.incivility_framework,
-            ecological_criteria=self.ecological_criteria,
-            classifier_prompt_template=self.simulation_config.get(
-                "classifier_prompt_template",
-                DEFAULT_CLASSIFIER_PROMPT_TEMPLATE,
-            ),
-            performer_prompt_template=self.simulation_config.get("performer_prompt_template") or None,
-            director_action_prompt_template=self.simulation_config.get("director_action_prompt_template") or None,
-            director_evaluate_prompt_template=self.simulation_config.get("director_evaluate_prompt_template") or None,
-            moderator_prompt_template=self.simulation_config.get("moderator_prompt_template") or None,
-            humanize_output=bool(self.simulation_config.get("humanize_output", False)),
-            humanize_rules={
-                "strip_hashtags":       int(self.simulation_config.get("humanize_strip_hashtags", 100)),
-                "strip_inverted_punct": int(self.simulation_config.get("humanize_strip_inverted_punct", 100)),
-                "word_subs":            int(self.simulation_config.get("humanize_word_subs", 80)),
-                "drop_accents":         int(self.simulation_config.get("humanize_drop_accents", 40)),
-                "comma_spacing":        int(self.simulation_config.get("humanize_comma_spacing", 50)),
-                "max_emoji":            int(self.simulation_config.get("humanize_max_emoji", 1)),
-            },
-            humanize_mode=self.simulation_config.get("humanize_mode", "general"),
-            humanize_per_agent=self.simulation_config.get("humanize_per_agent") or {},
-            agent_traits=self._agent_traits if self._agent_mode == "pool" else None,
-            rng=self._rng,
-        )
-        orchestrator.set_participant_stance_hint(self.participant_stance_hint)
-        self.agent_manager.orchestrator = orchestrator
-
         if self._parallel_turns > 1:
             self._pipeline_agents = [[] for _ in range(self._parallel_turns)]
             for i, name in enumerate(self._agent_names):
@@ -523,11 +516,15 @@ class SimulationSession:
         else:
             self._pipeline_agents = []
 
+        self._pipeline_orchestrators = self._build_pipeline_orchestrators()
+        self.agent_manager.orchestrator = self._pipeline_orchestrators[0]
+
     async def set_participant_stance_hint(self, participant_stance_hint: Optional[str]) -> None:
         """Update the participant self-report and, in pool mode, refresh the roster."""
         self.participant_stance_hint = participant_stance_hint
         self.state.participant_stance_hint = participant_stance_hint
-        self.agent_manager.orchestrator.set_participant_stance_hint(participant_stance_hint)
+        for orc in self._pipeline_orchestrators:
+            orc.set_participant_stance_hint(participant_stance_hint)
 
         if self._agent_mode == "pool":
             pool = db_conn.get_pool()
@@ -664,8 +661,7 @@ class SimulationSession:
                 if self._rng.random() < post_probability:
                     if self._parallel_turns > 1:
                         # Fire turn as background task, capped by parallel_turns.
-                        # No stagger needed — _director_lock in _parallel_turn already
-                        # sequences Directors so each reads fresh chat state.
+                        # Each pipeline has its own Orchestrator so Directors run concurrently.
                         if len(self._active_turn_tasks) < self._parallel_turns:
                             self._next_pipeline_id = (self._next_pipeline_id % self._parallel_turns) + 1
                             pid = self._next_pipeline_id
@@ -728,31 +724,30 @@ class SimulationSession:
     async def _parallel_turn(self, pid: int, allowed_agents: List[str], stagger_delay: float = 0.0) -> None:
         """Execute a single agent turn in parallel-friendly mode.
 
-        Pipelines are serialised through the Director phase (_director_lock) so
-        each one reads the chat state *after* the previous pipeline has persisted
-        its message.  This prevents multiple Directors from seeing the same
-        conversation and producing redundant replies.
+        Each pipeline slot has its own Orchestrator instance, so Directors run
+        fully concurrently without any serialisation lock.  Agent pools are
+        pre-split across slots to prevent duplicate agent selection.
 
-        The Performer call (the slowest part) runs outside both locks so multiple
-        agents can generate their messages concurrently.
+        The persist+broadcast phase (_turn_lock) is still serialised to keep
+        message ordering consistent in the database.
 
         ``pid`` tags log events for the report.
         ``allowed_agents`` restricts which agents this pipeline's Director can pick.
         """
         from utils.logger import pipeline_id_var
         pipeline_id_var.set(pid)
+        orchestrator = self._pipeline_orchestrators[pid - 1]
         try:
             if stagger_delay > 0:
                 await asyncio.sleep(stagger_delay)
 
             await self._publish_typing(started=True)
 
-            # ── Phase 1: Director (serialised so each sees fresh state) ───────
-            async with self._director_lock:
-                result = await self.agent_manager.orchestrator.execute_turn(
-                    self.internal_validity_criteria,
-                    allowed_performers=set(allowed_agents),
-                )
+            # ── Phase 1: Director — runs concurrently across pipelines ────────
+            result = await orchestrator.execute_turn(
+                self.internal_validity_criteria,
+                allowed_performers=set(allowed_agents),
+            )
 
             if result is None or result.action_type == "wait":
                 return

@@ -26,6 +26,13 @@ class TestBuildClassifierSystemPrompt:
         prompt = build_classifier_system_prompt(chatroom_context="Debate politico")
         assert "Debate politico" in prompt
 
+    def test_reduces_runtime_stance_fields_to_null(self):
+        prompt = build_classifier_system_prompt(chatroom_context="Debate politico")
+        assert "classify each AGENT message for incivility only" in prompt
+        assert "Always return `is_like_minded = null`" in prompt
+        assert "Always return `stance_confidence = null`" in prompt
+        assert "Always return `inferred_participant_stance = null`" in prompt
+
 
 class TestBuildClassifierUserPrompt:
     def test_injects_placeholders(self):

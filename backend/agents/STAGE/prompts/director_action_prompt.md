@@ -11,9 +11,15 @@ Here is the chatroom context, as described by the researcher for this experiment
 
 ## Participant Self-Report
 
-If available, use this as a soft prior when selecting which performer should act next and which agents best fit the current treatment. It is not ground truth and should never override the treatment criteria or the classifier's later inference.
+If available, use this as a soft prior when selecting which performer should act next and which agents best fit the current treatment. It is not ground truth and should never override the treatment criteria.
 
 `{PARTICIPANT_STANCE_HINT}`
+
+## Resolved Participant Alignment Cell
+
+Use this resolved cell directly. Do not re-map the participant from scratch.
+
+`{PARTICIPANT_ALIGNMENT_CELL}`
 
 Complete instructions and the corresponding data you need for each step will be provided in the user message below.
 {PARTICIPANT_NAME_NOTE}
@@ -25,13 +31,17 @@ Work through the following steps in order. Each step provides the data you need 
 
 Read the validity evaluations below. They describe the current state of the chatroom with respect to the validity criteria. What do they suggest the next action should address, to satisfy both simultaneously?
 
+When the treatment concerns incivility, reason in terms of the running proportion of uncivil messages. Do not think in low, medium, or high incivility levels.
+
 {#USER}
 **Internal validity**: {INTERNAL_VALIDITY_SUMMARY}
 
 **Ecological validity**: {ECOLOGICAL_VALIDITY_SUMMARY}
 
 **Observed treatment fidelity**
-These are the live classifier outputs for agent messages so far.
+These are simple running percentages for agent messages so far.
+- Like-minded / not-like-minded percentages are structural counts based on fixed treatment roles.
+- Civil / incivil percentages are observed counts from the classifier.
 
 {TREATMENT_FIDELITY_SUMMARY}
 {/USER}
@@ -42,38 +52,24 @@ Read the performer profiles and participation counts below. Which performer is b
 
 **Important:** You may only select an agent as `next_performer`. The human participant is never a valid performer — you cannot instruct or correct them. If the participant's most recent message is off-topic or extreme, treat it as context for how agents should respond, not as a performance to fix.
 
-**Fixed traits are immutable:** Each performer has a `[Fixed traits: ideology=X, incivility=Y]` label. These never change. Here, `ideology=left` means the performer is pro-measure (supports the article's policy), and `ideology=right` means the performer is anti-measure (opposes it). Like-minded performers are those whose ideology aligns with the participant's current stance, and not-like-minded performers are those whose ideology conflicts with it. Never select or instruct a performer in a way that flips that relationship.
+**Fixed traits are immutable:** Each performer has fixed traits such as `ideology`, `incivility`, and `alignment_cell`. These never change. Keep `ideology` as a realism trait that affects framing, blame, vocabulary, and political style. But do **not** use ideology alone to decide who is like-minded.
 
-**Operational rule:** If the participant is against the article/measure, a `ideology=right` performer is like-minded; an `ideology=left` performer is not-like-minded. If the participant is in favor, the mapping reverses. Always reason from alignment with the participant first, then from the article position.
+**Primary alignment rule:** Use `alignment_cell` as the treatment rule.
 
-**Qualified participant stances:** If the participant self-report says they are only *qualifiedly* in favor or against (for example, they support the general goal but think this specific measure is too weak, or they reject this measure without sharing the opposite camp's whole worldview), keep the treatment mapping on the same broad side (`qualified_favor` counts with favor, `qualified_against` counts with against). But when choosing performers, prefer disagreement that is close to the participant's frame before jumping to the hardest ideological opposition. In those cases, a good `not-like-minded` choice often disagrees about the adequacy, realism, or design of the measure rather than rejecting the whole underlying goal.
+Valid cells are:
+- `pro_policy_pro_topic`
+- `anti_policy_pro_topic`
+- `anti_policy_anti_topic`
 
-**Secondary topic-stance selector:** In addition to the participant's stance on the measure, infer a softer `participant_topic_stance` from the participant's actual messages, using the self-report only as a hint:
-- `pro_topic`: they support the broader underlying cause or group (for example, pro immigration, or pro climate action).
-- `anti_topic`: they oppose the broader underlying cause or group.
-- `unclear`: you cannot tell reliably.
+There is no clean `pro_policy_anti_topic` cell in this experiment.
 
-Use this only as a secondary selector. Do **not** redefine `like-minded` or `not-like-minded` with it.
+Then apply this rule:
+- `like-minded` performers are agents whose `alignment_cell` exactly matches the participant's current cell.
+- `not-like-minded` performers are agents whose `alignment_cell` is one of the other valid cells.
 
-- The participant's stance on the **measure** still decides who is `like-minded` and who is `not-like-minded`.
-- The inferred `participant_topic_stance` only decides what **kind** of support or opposition will feel most natural.
+**Important consequence:** Agreement on policy alone is **not** enough for `like-minded`. To count as like-minded, a performer must match both the participant's topic side and policy side.
 
-If `participant_topic_stance = pro_topic`:
-- and the participant is `favor` on the measure:
-  - prefer `like-minded` performers who are also broadly `pro_topic`;
-  - prefer `not-like-minded` performers who oppose the participant from the harder anti-topic side.
-- and the participant is `against` on the measure:
-  - prefer `like-minded` performers who are still broadly `pro_topic` but criticize this specific measure;
-  - allow `not-like-minded` performers of two natural kinds:
-    - performers who are broadly `pro_topic` but defend the measure;
-    - performers who are broadly `anti_topic` and oppose the participant from a harder ideological position.
-
-If `participant_topic_stance = anti_topic`:
-- prefer `like-minded` performers who are also broadly `anti_topic`;
-- prefer `not-like-minded` performers who are broadly `pro_topic`.
-
-If `participant_topic_stance = unclear`:
-- ignore this secondary signal and choose performers only from the participant's stance on the measure.
+**How to use ideology under this rule:** Once you know which cell the performer must come from, use `ideology` only to choose the most natural flavor of that support or opposition. `alignment_cell` decides treatment role; `ideology` decides political color and realism.
 
 {#USER}
 {AGENT_PROFILES}
@@ -121,6 +117,8 @@ Select exactly one action type:
 
 **No same-side infighting:** If two agents share the same fixed `ideology` on the measure (both `left` or both `right`), do not have them attack, mock, or directly challenge each other. When aligned agents interact, it should be supportive, additive, or a simple `like`; if a direct attack would be needed, choose a different target or use a room-directed `message` instead.
 
+**Protect the participant from severe direct abuse:** Even in incivil treatments, do not instruct agents to use severe personal insults directly at the human participant. They may strongly criticize the participant's opinion, reasoning, framing, or coalition. Mild direct labels such as "ingenuo" or "ignorante" are acceptable when natural, but stronger abuse, degrading name-calling, or direct personal humiliation toward the participant is not.
+
 ### Step 4: Write the Performer Instruction
 
 Translate the priority, performer, and action you selected into an instruction for the performer. For non-like actions, provide three fields:
@@ -131,13 +129,15 @@ Translate the priority, performer, and action you selected into an instruction f
 
 These fields should be concise (1-2 sentences each) and together should give the performer a clear sense of what they want to achieve and why, without prescribing the content of their message.
 
-**Instruction must be consistent with the performer's fixed traits.** Read `ideology=left` (pro-measure) / `ideology=right` (anti-measure) relative to the participant's stance in this session. If the participant is against the article, `ideology=right` performers should support the participant's anti-measure position and `ideology=left` performers should oppose it; if the participant is in favor, the reverse is true. Agents who share the same ideology must not be instructed to attack each other. An instruction that contradicts a performer's ideology-to-participant alignment will produce incoherent output.
+**Instruction must be consistent with the performer's fixed traits.** The performer's `alignment_cell` decides whether they are acting as like-minded or not-like-minded in this session. Their `ideology` should shape *how* they say it, not flip their treatment role. Agents who share the same ideology must not be instructed to attack each other. An instruction that contradicts a performer's `alignment_cell` will produce incoherent output.
 
 **When using `message`, make the contrast explicit:** A room-directed `message` from the minority side should read like a clear counter-position to the dominant recent messages, not a generic contribution. Name the opposing person, message, or bloc they are pushing against, and explicitly tell the performer not to agree with, praise, or echo the participant or any recent opposing message when that would contradict their side.
 
 **Length variety:** Do not default every directive to "short" or "very short." Keep the chat natural by allowing a mix of lengths across the conversation: some reactions can be extremely brief, many can stay compact, and some can be slightly more developed. Ask for brevity only when the moment truly calls for it.
 
 **Anchor hostile support to a clear target:** When a performer's ideology is `left` (pro-measure) and their tone is uncivil, do not let the hostility float vaguely. Point it at a concrete critic, a recent opposing message, or an explicitly named opposing group (for example "los que se oponen", "los de siempre", "los hipócritas"). If there is no suitable individual target, the instruction should still make clear who is being attacked.
+
+**If addressing the participant directly:** The performer may disagree sharply, mock the argument, or use mild labels such as "ingenuo" or "ignorante", but must not use severe direct insults against the participant. Prefer attacking the opinion, the framing, or the bloc behind it rather than personally abusing the participant.
 
 ## Output Format
 

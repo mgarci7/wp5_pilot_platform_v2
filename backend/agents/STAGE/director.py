@@ -70,31 +70,35 @@ def format_agent_profiles(
     profiles: Dict[str, str],
     traits: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> str:
-    """Format performer profiles dict into a readable string for prompts."""
+    """Format performer profiles into a compact one-line summary per agent."""
     if not profiles:
         return "(No performer profiles yet — this is the start of the session.)"
 
     lines = []
     for name, profile in profiles.items():
-        trait_suffix = ""
+        trait_bits = []
         if traits:
             trait = traits.get(name)
             if trait:
-                trait_bits = []
                 ideology = trait.get("ideology")
                 incivility = trait.get("incivility")
+                alignment_cell = trait.get("alignment_cell")
+                if alignment_cell:
+                    trait_bits.append(f"cell={alignment_cell}")
                 if ideology:
                     trait_bits.append(f"ideology={ideology}")
                 if incivility:
-                    trait_bits.append(f"incivility={incivility}")
-                if trait_bits:
-                    trait_suffix = f" [Fixed traits: {', '.join(trait_bits)}]"
+                    trait_bits.append(f"tone={incivility}")
 
         if profile:
-            lines.append(f"**{name}**: {profile}{trait_suffix}")
+            compact_profile = " ".join(profile.split())
+            if len(compact_profile) > 90:
+                compact_profile = compact_profile[:87].rstrip() + "..."
+            trait_bits.append(f"recent={compact_profile}")
         else:
-            base = f"**{name}**: (This performer has not acted yet.)"
-            lines.append(f"{base}{trait_suffix}")
+            trait_bits.append("recent=not acted yet")
+
+        lines.append(f"**{name}**: {', '.join(trait_bits)}")
     return "\n\n".join(lines)
 
 
@@ -111,6 +115,13 @@ def format_participant_hint(participant_stance_hint: Optional[str]) -> str:
         "skeptical": "participant self-report: skeptical / unsure about the article",
     }
     return labels.get(participant_stance_hint, f"participant self-report: {participant_stance_hint}")
+
+
+def format_participant_alignment_cell(participant_alignment_cell: Optional[str]) -> str:
+    """Format the resolved participant alignment cell for Director prompts."""
+    if not participant_alignment_cell:
+        return "participant alignment cell: unclear / mixed"
+    return f"participant alignment cell: {participant_alignment_cell}"
 
 
 def format_treatment_fidelity_summary(messages: List[Message]) -> str:
@@ -212,10 +223,18 @@ def build_update_user_prompt(
 
     if last_agent_traits:
         traits_parts = []
+        if last_agent_traits.get("stance"):
+            traits_parts.append(f"stance={last_agent_traits['stance']}")
         if last_agent_traits.get("ideology"):
             traits_parts.append(f"ideology={last_agent_traits['ideology']}")
         if last_agent_traits.get("incivility"):
             traits_parts.append(f"incivility={last_agent_traits['incivility']}")
+        if last_agent_traits.get("topic_stance"):
+            traits_parts.append(f"topic_stance={last_agent_traits['topic_stance']}")
+        if last_agent_traits.get("policy_stance"):
+            traits_parts.append(f"policy_stance={last_agent_traits['policy_stance']}")
+        if last_agent_traits.get("alignment_cell"):
+            traits_parts.append(f"alignment_cell={last_agent_traits['alignment_cell']}")
         traits_str = f"[Fixed traits: {', '.join(traits_parts)}]" if traits_parts else ""
     else:
         traits_str = ""
@@ -256,6 +275,7 @@ def build_evaluate_system_prompt(
     ecological_criteria: str,
     chatroom_context: str = "",
     participant_stance_hint: str = "",
+    participant_alignment_cell: str = "",
     participant_name: str = "",
     template: Optional[str] = None,
 ) -> str:
@@ -264,6 +284,7 @@ def build_evaluate_system_prompt(
     prompt = _render_prompt(raw, "system")
     prompt = prompt.replace("{CHATROOM_CONTEXT}", chatroom_context)
     prompt = prompt.replace("{PARTICIPANT_STANCE_HINT}", participant_stance_hint)
+    prompt = prompt.replace("{PARTICIPANT_ALIGNMENT_CELL}", participant_alignment_cell)
     prompt = prompt.replace("{INTERNAL_VALIDITY_CRITERIA}", internal_validity_criteria)
     prompt = prompt.replace("{ECOLOGICAL_VALIDITY_CRITERIA}", ecological_criteria)
     participant_note = f"\n\nThe human participant's name is **{participant_name}**. Use this name (not 'participant') when referring to them in your evaluations." if participant_name else ""
@@ -317,6 +338,7 @@ def build_evaluate_user_prompt(
     ecological_criteria: str = "",
     chatroom_context: str = "",
     participant_stance_hint: str = "",
+    participant_alignment_cell: str = "",
     treatment_fidelity_summary: str = "",
     action_counts: Optional[Dict[str, int]] = None,
     performer_counts: Optional[Dict[str, int]] = None,
@@ -334,6 +356,7 @@ def build_evaluate_user_prompt(
     prompt = _render_prompt(raw, "user")
     prompt = prompt.replace("{CHATROOM_CONTEXT}", chatroom_context)
     prompt = prompt.replace("{PARTICIPANT_STANCE_HINT}", participant_stance_hint)
+    prompt = prompt.replace("{PARTICIPANT_ALIGNMENT_CELL}", participant_alignment_cell)
     prompt = prompt.replace("{INTERNAL_VALIDITY_CRITERIA}", internal_validity_criteria)
     prompt = prompt.replace("{ECOLOGICAL_VALIDITY_CRITERIA}", ecological_criteria)
     prompt = prompt.replace("{PREVIOUS_INTERNAL_VALIDITY_EVALUATION}", prev_internal)
@@ -372,6 +395,7 @@ def parse_evaluate_response(raw: str) -> dict:
 def build_action_system_prompt(
     chatroom_context: str = "",
     participant_stance_hint: str = "",
+    participant_alignment_cell: str = "",
     participant_name: str = "",
     template: Optional[str] = None,
 ) -> str:
@@ -384,6 +408,7 @@ def build_action_system_prompt(
     prompt = _render_prompt(raw, "system")
     prompt = prompt.replace("{CHATROOM_CONTEXT}", chatroom_context)
     prompt = prompt.replace("{PARTICIPANT_STANCE_HINT}", participant_stance_hint)
+    prompt = prompt.replace("{PARTICIPANT_ALIGNMENT_CELL}", participant_alignment_cell)
     participant_note = f"\n\nThe human participant's name is **{participant_name}**. Always use this name (not 'participant') when referring to them in `target_user` or instructions." if participant_name else ""
     prompt = prompt.replace("{PARTICIPANT_NAME_NOTE}", participant_note)
     return prompt
@@ -396,6 +421,7 @@ def build_action_user_prompt(
     ecological_validity_summary: str,
     chatroom_context: str = "",
     participant_stance_hint: str = "",
+    participant_alignment_cell: str = "",
     treatment_fidelity_summary: str = "",
     performer_counts: Optional[Dict[str, int]] = None,
     action_counts: Optional[Dict[str, int]] = None,
@@ -413,6 +439,7 @@ def build_action_user_prompt(
     prompt = _render_prompt(raw, "user")
     prompt = prompt.replace("{CHATROOM_CONTEXT}", chatroom_context)
     prompt = prompt.replace("{PARTICIPANT_STANCE_HINT}", participant_stance_hint)
+    prompt = prompt.replace("{PARTICIPANT_ALIGNMENT_CELL}", participant_alignment_cell)
     prompt = prompt.replace("{INTERNAL_VALIDITY_SUMMARY}", internal_validity_summary)
     prompt = prompt.replace("{ECOLOGICAL_VALIDITY_SUMMARY}", ecological_validity_summary)
     prompt = prompt.replace("{TREATMENT_FIDELITY_SUMMARY}", treatment_fidelity_summary)

@@ -33,6 +33,84 @@ def _non_uncivil_order(target: int) -> List[str]:
     return [level for level in _incivility_order(target) if level != "uncivil"]
 
 
+def _participant_alignment_cell(participant_stance: Optional[str]) -> Optional[str]:
+    """Map participant self-report to the experiment's valid alignment cells."""
+    stance = (participant_stance or "").strip().lower()
+    if stance in {"favor", "qualified_favor"}:
+        return "pro_policy_pro_topic"
+    if stance == "qualified_against":
+        return "anti_policy_pro_topic"
+    if stance == "against":
+        return "anti_policy_anti_topic"
+    if stance == "skeptical":
+        return None
+    return "pro_policy_pro_topic"
+
+
+def _agent_alignment_cell(agent: dict) -> Optional[str]:
+    """Return the agent's valid topic+policy alignment cell."""
+    explicit = str(agent.get("alignment_cell", "")).strip().lower()
+    if explicit in {
+        "pro_policy_pro_topic",
+        "anti_policy_pro_topic",
+        "anti_policy_anti_topic",
+    }:
+        return explicit
+
+    policy_stance = str(agent.get("policy_stance", "")).strip().lower()
+    topic_stance = str(agent.get("topic_stance", "")).strip().lower()
+
+    if not policy_stance:
+        stance = str(agent.get("stance", "")).strip().lower()
+        ideology = str(agent.get("ideology", "")).strip().lower()
+        if stance in {"agree", "support", "favor", "pro"}:
+            policy_stance = "pro_policy"
+        elif stance in {"disagree", "oppose", "against", "anti"}:
+            policy_stance = "anti_policy"
+        elif ideology == "left":
+            policy_stance = "pro_policy"
+        elif ideology == "right":
+            policy_stance = "anti_policy"
+
+    if not topic_stance:
+        if policy_stance == "pro_policy":
+            topic_stance = "pro_topic"
+        elif policy_stance == "anti_policy":
+            topic_stance = "anti_topic"
+
+    if policy_stance == "pro_policy" and topic_stance == "pro_topic":
+        return "pro_policy_pro_topic"
+    if policy_stance == "anti_policy" and topic_stance == "pro_topic":
+        return "anti_policy_pro_topic"
+    if policy_stance == "anti_policy" and topic_stance == "anti_topic":
+        return "anti_policy_anti_topic"
+    return None
+
+
+def _participant_cell_preferences(participant_stance: Optional[str]) -> tuple[List[str], List[str]]:
+    """Return (like_cells, opposite_cells) for the participant stance."""
+    participant_cell = _participant_alignment_cell(participant_stance)
+    if participant_cell == "pro_policy_pro_topic":
+        return (
+            ["pro_policy_pro_topic"],
+            ["anti_policy_pro_topic", "anti_policy_anti_topic"],
+        )
+    if participant_cell == "anti_policy_pro_topic":
+        return (
+            ["anti_policy_pro_topic"],
+            ["pro_policy_pro_topic", "anti_policy_anti_topic"],
+        )
+    if participant_cell == "anti_policy_anti_topic":
+        return (
+            ["anti_policy_anti_topic"],
+            ["pro_policy_pro_topic", "anti_policy_pro_topic"],
+        )
+    return (
+        ["pro_policy_pro_topic", "anti_policy_pro_topic", "anti_policy_anti_topic"],
+        [],
+    )
+
+
 def _participant_stance_preferences(participant_stance: Optional[str]) -> tuple[List[str], List[str], List[str], List[str]]:
     """Return (like_ideologies, opposite_ideologies, like_ideologies_order, opposite_ideologies_order).
 
@@ -57,17 +135,17 @@ def _participant_stance_preferences(participant_stance: Optional[str]) -> tuple[
 def _rank_pool_agents(
     agents: List[dict],
     *,
-    ideology_order: List[str],
+    cell_order: List[str],
     incivility_order: List[str],
 ) -> List[dict]:
-    ideology_rank = {value: i for i, value in enumerate(ideology_order)}
+    cell_rank = {value: i for i, value in enumerate(cell_order)}
     incivility_rank = {value: i for i, value in enumerate(incivility_order)}
 
     def _key(agent: dict) -> tuple[int, int, str]:
-        ideology = str(agent.get("ideology", "center"))
+        alignment_cell = _agent_alignment_cell(agent) or ""
         incivility = str(agent.get("incivility", "civil"))
         return (
-            ideology_rank.get(ideology, len(ideology_order)),
+            cell_rank.get(alignment_cell, len(cell_order)),
             incivility_rank.get(incivility, len(incivility_order)),
             str(agent.get("name", "")),
         )
@@ -80,7 +158,7 @@ def _take_ranked_agents(
     *,
     count: int,
     used_ids: set[str],
-    ideology_order: List[str],
+    cell_order: List[str],
     incivility_order: List[str],
     allowed_incivilities: Optional[List[str]] = None,
 ) -> List[dict]:
@@ -98,7 +176,7 @@ def _take_ranked_agents(
     ]
     ranked = _rank_pool_agents(
         filtered,
-        ideology_order=ideology_order,
+        cell_order=cell_order,
         incivility_order=incivility_order,
     )
     selected = ranked[:count]
@@ -393,16 +471,14 @@ class SimulationSession:
         like_non_uncivil_count = max(0, like_count - like_uncivil_count)
         opposite_non_uncivil_count = max(0, opposite_count - opposite_uncivil_count)
 
-        like_ideologies, opposite_ideologies, like_ideologies_order, opposite_ideologies_order = _participant_stance_preferences(
-            participant_stance_hint
-        )
+        like_cells, opposite_cells = _participant_cell_preferences(participant_stance_hint)
         incivility_order = _incivility_order(incivility_target)
         non_uncivil_order = _non_uncivil_order(incivility_target)
 
-        like_candidates = [a for a in candidate_pool if str(a.get("ideology", "center")) in like_ideologies]
+        like_candidates = [a for a in candidate_pool if _agent_alignment_cell(a) in like_cells]
         if not like_candidates:
             like_candidates = list(candidate_pool)
-        opposite_candidates = [a for a in candidate_pool if str(a.get("ideology", "center")) in opposite_ideologies]
+        opposite_candidates = [a for a in candidate_pool if _agent_alignment_cell(a) in opposite_cells]
         if not opposite_candidates:
             opposite_candidates = list(candidate_pool)
 
@@ -414,7 +490,7 @@ class SimulationSession:
             like_candidates,
             count=like_uncivil_count,
             used_ids=used_ids,
-            ideology_order=like_ideologies_order,
+            cell_order=like_cells,
             incivility_order=["uncivil"],
             allowed_incivilities=["uncivil"],
         ))
@@ -422,7 +498,7 @@ class SimulationSession:
             opposite_candidates,
             count=opposite_uncivil_count,
             used_ids=used_ids,
-            ideology_order=opposite_ideologies_order,
+            cell_order=opposite_cells,
             incivility_order=["uncivil"],
             allowed_incivilities=["uncivil"],
         ))
@@ -430,7 +506,7 @@ class SimulationSession:
             like_candidates,
             count=like_non_uncivil_count,
             used_ids=used_ids,
-            ideology_order=like_ideologies_order,
+            cell_order=like_cells,
             incivility_order=non_uncivil_order,
             allowed_incivilities=non_uncivil_order,
         ))
@@ -438,7 +514,7 @@ class SimulationSession:
             opposite_candidates,
             count=opposite_non_uncivil_count,
             used_ids=used_ids,
-            ideology_order=opposite_ideologies_order,
+            cell_order=opposite_cells,
             incivility_order=non_uncivil_order,
             allowed_incivilities=non_uncivil_order,
         ))
@@ -454,7 +530,7 @@ class SimulationSession:
                 like_candidates,
                 count=remaining_like,
                 used_ids=used_ids,
-                ideology_order=like_ideologies_order,
+                cell_order=like_cells,
                 incivility_order=incivility_order,
             ))
 
@@ -467,19 +543,19 @@ class SimulationSession:
                 opposite_candidates,
                 count=remaining_opposite,
                 used_ids=used_ids,
-                ideology_order=opposite_ideologies_order,
+                cell_order=opposite_cells,
                 incivility_order=incivility_order,
             ))
 
         # Final fallback only if the pool cannot satisfy the exact quota structure.
         remaining_total = max(0, target_count - len(pool_agents))
         if remaining_total > 0:
-            fallback_ideology_order = like_ideologies_order + [i for i in opposite_ideologies_order if i not in like_ideologies_order]
+            fallback_cell_order = like_cells + [cell for cell in opposite_cells if cell not in like_cells]
             pool_agents.extend(_take_ranked_agents(
                 candidate_pool,
                 count=remaining_total,
                 used_ids=used_ids,
-                ideology_order=fallback_ideology_order,
+                cell_order=fallback_cell_order,
                 incivility_order=incivility_order,
             ))
 
@@ -490,6 +566,9 @@ class SimulationSession:
             traits[a["name"]] = {
                 "incivility": a.get("incivility", "civil"),
                 "ideology": a.get("ideology", "center"),
+                "policy_stance": a.get("policy_stance", ""),
+                "topic_stance": a.get("topic_stance", ""),
+                "alignment_cell": a.get("alignment_cell", ""),
             }
         return agent_names, agent_personas, traits
 

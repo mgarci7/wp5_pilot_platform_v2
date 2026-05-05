@@ -65,27 +65,12 @@ For every 10 group messages:
 - LIKEMINDED_TARGET 50 means 5 like-minded and 5 not-like-minded.
 - LIKEMINDED_TARGET 80 means 8 like-minded and 2 not-like-minded.
 
-Incivility level mapping:
-- low:
-  - Impoliteness: low.
-  - Hate speech and stereotyping: none.
-  - Threats to democratic freedoms: none.
-  - Style: short, natural, and mostly civil.
-  - Allowed incivility at this level is limited to mild rudeness, sarcasm, mockery, or dismissive tone.
-
-- medium:
-  - Impoliteness: medium including sarcasm, mockery, dismissiveness, as well as name-calling.
-  - Hate speech and stereotyping: indirect or problematic group generalizations may appear, but without slurs or explicit dehumanization.
-  - Threats to democratic freedoms: mild delegitimizing or manipulative anti-democratic claims may appear.
-  - Style: short and natural.
-  - This is the realistic mixed condition: the thread should feel plausible, with some friction, some sharper replies, and some civil back-and-forth.
-
-- high:
-  - Impoliteness: all uncivil messages must be obviously impolite. Include strong insults, rudeness, vulgarity, name-calling, aspersion, belittling others, or graphic shouting cues such as all-caps or excessive exclamation marks.
-  - Hate speech and stereotyping: strong stereotyped group contempt with frequent slurs should appear, but without explicit dehumanization. 
-  - Threats to democratic freedoms: strong delegitimizing or pro-authoritarian framing should appear.
-  - Style: short, sharp, and confrontational. Prioritize hostility rather than elaborate arguments.
-  - Uncivility should read as very incivil to a human coder.
+Execution rule:
+- Do not use low, medium, or high incivility levels.
+- Use the shared taxonomy above to decide whether each message is civil or uncivil.
+- Let the treatment control only the proportion of uncivil messages through INCIVILITY_TARGET.
+- An uncivil message should be clearly uncivil to a human coder.
+- A civil message should stay free of the uncivil features above.
 
 Safety rules:
 - No physical threats.
@@ -99,100 +84,91 @@ export const STANCE_EXECUTION_3X3 = `Alignment is a hard constraint and is indep
 - Never rely on hostility alone to communicate stance.`
 
 const GROUP_TREATMENTS: Array<[string, string]> = [
-  ["not_incivil_not_like_minded", `INCIVILITY_LEVEL = low
-INCIVILITY_TARGET = 20
+  ["not_incivil_not_like_minded", `INCIVILITY_TARGET = 20
 LIKEMINDED_TARGET = 20
 NOT_LIKEMINDED_TARGET = 80
 
-Apply the incivility level using the shared incivility framework.
+Use the shared incivility framework only to decide whether each message counts as civil or uncivil.
 Follow the stance execution rules: like-minded messages must clearly agree, not-like-minded messages must clearly disagree, and mix messages must stay balanced.
 Follow global rules.
 Do not reinterpret definitions.
 Do not change percentages.`,
   ],
-  ["not_incivil_mix", `INCIVILITY_LEVEL = low
-INCIVILITY_TARGET = 20
+  ["not_incivil_mix", `INCIVILITY_TARGET = 20
 LIKEMINDED_TARGET = 50
 NOT_LIKEMINDED_TARGET = 50
 
-Apply the incivility level using the shared incivility framework.
+Use the shared incivility framework only to decide whether each message counts as civil or uncivil.
 Follow the stance execution rules: like-minded messages must clearly agree, not-like-minded messages must clearly disagree, and mix messages must stay balanced.
 Follow global rules.
 Do not reinterpret definitions.
 Do not change percentages.`,
   ],
-  ["not_incivil_like_minded", `INCIVILITY_LEVEL = low
-INCIVILITY_TARGET = 20
+  ["not_incivil_like_minded", `INCIVILITY_TARGET = 20
 LIKEMINDED_TARGET = 80
 NOT_LIKEMINDED_TARGET = 20
 
-Apply the incivility level using the shared incivility framework.
+Use the shared incivility framework only to decide whether each message counts as civil or uncivil.
 Follow the stance execution rules: like-minded messages must clearly agree, not-like-minded messages must clearly disagree, and mix messages must stay balanced.
 Follow global rules.
 Do not reinterpret definitions.
 Do not change percentages.`,
   ],
-  ["mix_not_like_minded", `INCIVILITY_LEVEL = medium
-INCIVILITY_TARGET = 50
+  ["mix_not_like_minded", `INCIVILITY_TARGET = 50
 LIKEMINDED_TARGET = 20
 NOT_LIKEMINDED_TARGET = 80
 
-Apply the incivility level using the shared incivility framework.
+Use the shared incivility framework only to decide whether each message counts as civil or uncivil.
 Follow the stance execution rules: like-minded messages must clearly agree, not-like-minded messages must clearly disagree, and mix messages must stay balanced.
 Follow global rules.
 Do not reinterpret definitions.
 Do not change percentages.`,
   ],
-  ["mix_mix", `INCIVILITY_LEVEL = medium
-INCIVILITY_TARGET = 50
+  ["mix_mix", `INCIVILITY_TARGET = 50
 LIKEMINDED_TARGET = 50
 NOT_LIKEMINDED_TARGET = 50
 
-Apply the incivility level using the shared incivility framework.
+Use the shared incivility framework only to decide whether each message counts as civil or uncivil.
 Follow the stance execution rules: like-minded messages must clearly agree, not-like-minded messages must clearly disagree, and mix messages must stay balanced.
 Follow global rules.
 Do not reinterpret definitions.
 Do not change percentages.`,
   ],
-  ["mix_like_minded", `INCIVILITY_LEVEL = medium
-INCIVILITY_TARGET = 50
+  ["mix_like_minded", `INCIVILITY_TARGET = 50
 LIKEMINDED_TARGET = 80
 NOT_LIKEMINDED_TARGET = 20
 
-Apply the incivility level using the shared incivility framework.
+Use the shared incivility framework only to decide whether each message counts as civil or uncivil.
 Follow the stance execution rules: like-minded messages must clearly agree, not-like-minded messages must clearly disagree, and mix messages must stay balanced.
 Follow global rules.
 Do not reinterpret definitions.
 Do not change percentages.`,
   ],
-  ["incivil_not_like_minded", `INCIVILITY_LEVEL = high
-INCIVILITY_TARGET = 80
+  ["incivil_not_like_minded", `INCIVILITY_TARGET = 80
 LIKEMINDED_TARGET = 20
 NOT_LIKEMINDED_TARGET = 80
 
-Apply the incivility level using the shared incivility framework.
+Use the shared incivility framework only to decide whether each message counts as civil or uncivil.
 Follow the stance execution rules: like-minded messages must clearly agree, not-like-minded messages must clearly disagree, and mix messages must stay balanced.
 Follow global rules.
 Do not reinterpret definitions.
 Do not change percentages.`,
   ],
-  ["incivil_mix", `INCIVILITY_LEVEL = high
-INCIVILITY_TARGET = 80
+  ["incivil_mix", `INCIVILITY_TARGET = 80
 LIKEMINDED_TARGET = 50
 NOT_LIKEMINDED_TARGET = 50
 
-Apply the incivility level using the shared incivility framework.
+Use the shared incivility framework only to decide whether each message counts as civil or uncivil.
 Follow the stance execution rules: like-minded messages must clearly agree, not-like-minded messages must clearly disagree, and mix messages must stay balanced.
 Follow global rules.
 Do not reinterpret definitions.
 Do not change percentages.`,
   ],
-  ["incivil_like_minded", `INCIVILITY_LEVEL = high
-INCIVILITY_TARGET = 80
+  ["incivil_like_minded", `INCIVILITY_TARGET = 80
 LIKEMINDED_TARGET = 80
 NOT_LIKEMINDED_TARGET = 20
 
-Apply the incivility level using the shared incivility framework.
+Use the shared incivility framework only to decide whether each message counts as civil or uncivil.
 Follow the stance execution rules: like-minded messages must clearly agree, not-like-minded messages must clearly disagree, and mix messages must stay balanced.
 Follow global rules.
 Do not reinterpret definitions.

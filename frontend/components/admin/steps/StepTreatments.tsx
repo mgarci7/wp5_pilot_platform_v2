@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import type { ExperimentalConfig, TreatmentGroup, SeedArticle, FeatureMeta, PoolAgent, HumanizeRules } from "../../../lib/admin-types"
+import type { ExperimentalConfig, TreatmentGroup, SeedArticle, FeatureMeta, PoolAgent, HumanizeRules, AgentAlignmentCell } from "../../../lib/admin-types"
 import { createExperimental3x3Preset } from "../../../lib/treatment-presets"
 import { createSeedFromTemplate, getNewsTemplateById, NEWS_TEMPLATE_OPTIONS, type NewsTemplateId } from "../../../lib/news-story-options"
 import { DEFAULT_AGENT_POOL, autoSelectAgents, getAgentPoolPreset, parseTargetsFromCriteria } from "../../../lib/agent-pool-presets"
@@ -154,6 +154,21 @@ const IDEOLOGY_BADGE: Record<string, { label: string; cls: string }> = {
   right:  { label: "Right",  cls: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" },
 }
 
+const ALIGNMENT_CELL_BADGE: Record<string, { label: string; cls: string }> = {
+  pro_policy_pro_topic: {
+    label: "Pro policy + pro topic",
+    cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  },
+  anti_policy_pro_topic: {
+    label: "Anti policy + pro topic",
+    cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+  },
+  anti_policy_anti_topic: {
+    label: "Anti policy + anti topic",
+    cls: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
+  },
+}
+
 const HUMANIZE_FIELDS: { key: keyof HumanizeRules; label: string; desc: string; def: number }[] = [
   { key: "strip_hashtags",       label: "Strip hashtags",           desc: "Removes #hashtag tokens",                        def: 100 },
   { key: "strip_inverted_punct", label: "Remove ¿ / ¡",             desc: "Drops Spanish inverted punctuation",              def: 100 },
@@ -216,6 +231,16 @@ function HumanizeRulesEditor({ rules, onChange }: { rules: HumanizeRules; onChan
 
 const DEFAULT_POOL_INCIVILITY: PoolAgent["incivility"] = "civil"
 
+function alignmentFields(cell: AgentAlignmentCell): Pick<PoolAgent, "alignment_cell" | "policy_stance" | "topic_stance"> {
+  if (cell === "pro_policy_pro_topic") {
+    return { alignment_cell: cell, policy_stance: "pro_policy", topic_stance: "pro_topic" }
+  }
+  if (cell === "anti_policy_pro_topic") {
+    return { alignment_cell: cell, policy_stance: "anti_policy", topic_stance: "pro_topic" }
+  }
+  return { alignment_cell: cell, policy_stance: "anti_policy", topic_stance: "anti_topic" }
+}
+
 function makeNextPoolAgentId(pool: PoolAgent[]): string {
   let idx = pool.length + 1
   const existing = new Set(pool.map((agent) => agent.id))
@@ -244,6 +269,7 @@ function AgentPoolEditor({
       name: `Agente ${pool.length + 1}`,
       incivility: DEFAULT_POOL_INCIVILITY,
       ideology: "center",
+      ...alignmentFields("pro_policy_pro_topic"),
       persona: "",
     }
     onChange([...pool, next])
@@ -330,6 +356,18 @@ function AgentPoolEditor({
                     <option value="civil">Civil</option>
                     <option value="moderate">Moderate</option>
                     <option value="uncivil">Uncivil</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-admin-muted mb-1">Alignment cell</label>
+                  <select
+                    value={agent.alignment_cell}
+                    onChange={(e) => updateAgent(index, alignmentFields(e.target.value as AgentAlignmentCell))}
+                    className={inputClass}
+                  >
+                    <option value="pro_policy_pro_topic">Pro policy + pro topic</option>
+                    <option value="anti_policy_pro_topic">Anti policy + pro topic</option>
+                    <option value="anti_policy_anti_topic">Anti policy + anti topic</option>
                   </select>
                 </div>
                 <div>
@@ -431,12 +469,12 @@ function PoolAgentSelector({
     onChange(ids)
   }
 
-  // Group by ideology
-  const byIdeology: Record<string, PoolAgent[]> = {}
+  // Group by alignment cell
+  const byAlignmentCell: Record<string, PoolAgent[]> = {}
   for (const agent of pool) {
-    const key = agent.ideology
-    if (!byIdeology[key]) byIdeology[key] = []
-    byIdeology[key].push(agent)
+    const key = agent.alignment_cell
+    if (!byAlignmentCell[key]) byAlignmentCell[key] = []
+    byAlignmentCell[key].push(agent)
   }
 
   return (
@@ -460,14 +498,15 @@ function PoolAgentSelector({
           The backend will use the participant&apos;s survey answer to choose the final agents from this candidate pool.
         </div>
       )}
-      {Object.entries(byIdeology).map(([ideology, agents]) => (
-        <div key={ideology}>
-          <p className="text-xs text-admin-faint mb-1 capitalize">{ideology}</p>
+      {Object.entries(byAlignmentCell).map(([alignmentCell, agents]) => (
+        <div key={alignmentCell}>
+          <p className="text-xs text-admin-faint mb-1">{ALIGNMENT_CELL_BADGE[alignmentCell]?.label ?? alignmentCell}</p>
           <div className="flex flex-wrap gap-1.5">
             {agents.map((agent) => {
               const selected = selectedIds.includes(agent.id)
               const incivilBadge = INCIVILITY_BADGE[agent.incivility] ?? INCIVILITY_BADGE.civil
               const ideologyBadge = IDEOLOGY_BADGE[agent.ideology] ?? IDEOLOGY_BADGE.center
+              const alignmentBadge = ALIGNMENT_CELL_BADGE[agent.alignment_cell] ?? ALIGNMENT_CELL_BADGE.pro_policy_pro_topic
               return (
                 <button
                   key={agent.id}
@@ -481,6 +520,9 @@ function PoolAgentSelector({
                   title={agent.persona}
                 >
                   <span className="font-medium">{agent.name}</span>
+                  <span className={`px-1 py-0.5 rounded text-[10px] leading-none ${alignmentBadge.cls}`}>
+                    {alignmentBadge.label}
+                  </span>
                   <span className={`px-1 py-0.5 rounded text-[10px] leading-none ${ideologyBadge.cls}`}>
                     {ideologyBadge.label}
                   </span>

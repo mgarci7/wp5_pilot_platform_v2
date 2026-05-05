@@ -9,8 +9,9 @@ from agents.STAGE.director import (
     format_chat_log,
     format_agent_profiles,
     format_participant_hint,
-    format_treatment_fidelity_summary,
+    format_participant_alignment_cell,
     build_action_system_prompt,
+    build_evaluate_system_prompt,
     parse_update_response,
     parse_evaluate_response,
     parse_action_response,
@@ -98,12 +99,21 @@ class TestFormatAgentProfiles:
 
     def test_profiles_with_traits(self):
         profiles = {"Performer 1": "Took a sceptical stance"}
-        traits = {"Performer 1": {"stance": "disagree", "incivility": "uncivil", "ideology": "right"}}
+        traits = {
+            "Performer 1": {
+                "stance": "disagree",
+                "incivility": "uncivil",
+                "ideology": "right",
+                "topic_stance": "pro_topic",
+                "policy_stance": "anti_policy",
+                "alignment_cell": "anti_policy_pro_topic",
+            }
+        }
         result = format_agent_profiles(profiles, traits=traits)
-        assert "Fixed traits" in result
-        assert "stance=disagree" in result
-        assert "incivility=uncivil" in result
+        assert "cell=anti_policy_pro_topic" in result
+        assert "tone=uncivil" in result
         assert "ideology=right" in result
+        assert "recent=Took a sceptical stance" in result
 
 
 class TestFormatParticipantHint:
@@ -120,81 +130,56 @@ class TestFormatParticipantHint:
         assert "specific measure" in result
 
 
-class TestFormatTreatmentFidelitySummary:
-    def test_empty_messages(self):
-        assert "No classifier-derived treatment metrics yet" in format_treatment_fidelity_summary([])
+class TestFormatParticipantAlignmentCell:
+    def test_formats_known_cell(self):
+        assert format_participant_alignment_cell("anti_policy_pro_topic") == (
+            "participant alignment cell: anti_policy_pro_topic"
+        )
 
-    def test_summary_with_messages(self):
-        msgs = [
-            _msg(
-                sender="Alice",
-                content="Hi",
-                is_incivil=False,
-                is_like_minded=True,
-                inferred_participant_stance="pro social spending",
-                metadata={"stance_confidence": "high"},
-            ),
-            _msg(
-                sender="Bob",
-                content="Rude",
-                is_incivil=True,
-                is_like_minded=False,
-            ),
-        ]
-        result = format_treatment_fidelity_summary(msgs)
-        assert "Incivil messages: 1/2" in result
-        assert "Like-minded messages: 1/2" in result
-        assert "confidence=high" in result
+    def test_formats_unknown_cell(self):
+        assert format_participant_alignment_cell(None) == (
+            "participant alignment cell: unclear / mixed"
+        )
 
 
 class TestBuildActionSystemPrompt:
-    def test_clarifies_stance_is_relative_to_participant(self):
+    def test_uses_alignment_cells_as_primary_treatment_rule(self):
         prompt = build_action_system_prompt(
             chatroom_context="Debate climatico",
             participant_stance_hint="participant self-report: against the article",
             participant_name="Martin",
         )
-        assert "relative to the participant's stance in this session" in prompt
-        assert "If the participant is against the article" in prompt
-        assert "Always reason from alignment with the participant first" in prompt
+        assert "Primary alignment rule" in prompt
+        assert "`like-minded` performers are agents whose `alignment_cell` exactly matches" in prompt
+        assert "`not-like-minded` performers are agents whose `alignment_cell` is one of the other valid cells" in prompt
 
-    def test_handles_qualified_participant_stances_without_changing_agent_fixed_sides(self):
+    def test_maps_participant_self_report_to_valid_cells(self):
         prompt = build_action_system_prompt(
             chatroom_context="Debate climatico",
             participant_stance_hint="participant self-report: broadly in favor of the article's direction, but with important reservations about the specific measure",
+            participant_alignment_cell="participant alignment cell: pro_policy_pro_topic",
             participant_name="Martin",
         )
-        assert "Qualified participant stances" in prompt
-        assert "`qualified_favor` counts with favor" in prompt
-        assert "prefer disagreement that is close to the participant's frame" in prompt
-        assert "adequacy, realism, or design of the measure" in prompt
+        assert "Resolved Participant Alignment Cell" in prompt
+        assert "`participant alignment cell: pro_policy_pro_topic`" in prompt
+        assert "Do not re-map the participant from scratch" in prompt
 
-    def test_adds_secondary_topic_stance_selector_without_redefining_like_minded(self):
+    def test_keeps_ideology_as_realism_layer_not_primary_alignment_rule(self):
         prompt = build_action_system_prompt(
             chatroom_context="Debate migratorio",
             participant_stance_hint="participant self-report: against the article",
+            participant_alignment_cell="participant alignment cell: anti_policy_anti_topic",
             participant_name="Martin",
         )
-        assert "Secondary topic-stance selector" in prompt
-        assert "Do **not** redefine `like-minded` or `not-like-minded` with it" in prompt
-        assert "The participant's stance on the **measure** still decides" in prompt
-        assert "what **kind** of support or opposition will feel most natural" in prompt
-
-    def test_topic_stance_rules_cover_pro_topic_against_measure_case(self):
-        prompt = build_action_system_prompt(
-            chatroom_context="Debate migratorio",
-            participant_stance_hint="participant self-report: broadly against the measure as framed, but not necessarily aligned with the opposite ideological camp",
-            participant_name="Martin",
-        )
-        assert "If `participant_topic_stance = pro_topic`" in prompt
-        assert "prefer `like-minded` performers who are still broadly `pro_topic` but criticize this specific measure" in prompt
-        assert "performers who are broadly `pro_topic` but defend the measure" in prompt
-        assert "performers who are broadly `anti_topic` and oppose the participant from a harder ideological position" in prompt
+        assert "Keep `ideology` as a realism trait" in prompt
+        assert "do **not** use ideology alone to decide who is like-minded" in prompt
+        assert "`alignment_cell` decides treatment role; `ideology` decides political color and realism" in prompt
 
     def test_requires_targeted_room_messages_to_name_opposition_and_non_validation(self):
         prompt = build_action_system_prompt(
             chatroom_context="Debate migratorio",
             participant_stance_hint="participant self-report: against the article",
+            participant_alignment_cell="participant alignment cell: anti_policy_anti_topic",
             participant_name="Martin",
         )
         assert "Targeted room messages" in prompt
@@ -206,12 +191,37 @@ class TestBuildActionSystemPrompt:
         prompt = build_action_system_prompt(
             chatroom_context="Debate migratorio",
             participant_stance_hint="participant self-report: against the article",
+            participant_alignment_cell="participant alignment cell: anti_policy_anti_topic",
             participant_name="Martin",
         )
         assert "Non-targeted room messages are exceptional" in prompt
         assert "Treat this as a last resort, not a default action" in prompt
         assert "If the latest message already gives you a natural anchor, use it" in prompt
         assert "treat a new room-wide opener as the wrong choice" in prompt
+
+    def test_protects_participant_from_severe_direct_abuse(self):
+        prompt = build_action_system_prompt(
+            chatroom_context="Debate migratorio",
+            participant_stance_hint="participant self-report: against the article",
+            participant_alignment_cell="participant alignment cell: anti_policy_anti_topic",
+            participant_name="Martin",
+        )
+        assert "Protect the participant from severe direct abuse" in prompt
+        assert 'Mild direct labels such as "ingenuo" or "ignorante" are acceptable' in prompt
+        assert "must not use severe direct insults against the participant" in prompt
+
+    def test_evaluate_prompt_requests_short_assessments(self):
+        prompt = build_evaluate_system_prompt(
+            internal_validity_criteria="Balance",
+            ecological_criteria="Naturalidad",
+            chatroom_context="Debate migratorio",
+            participant_stance_hint="participant self-report: against the article",
+            participant_alignment_cell="participant alignment cell: anti_policy_anti_topic",
+            participant_name="Martin",
+        )
+        assert "Resolved Participant Alignment Cell" in prompt
+        assert "Keep the evaluation compact and operational" in prompt
+        assert "1-2 short sentences" in prompt
 
 
 # ── parse_update_response — valid inputs ─────────────────────────────────────

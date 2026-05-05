@@ -27,7 +27,7 @@ from agents.STAGE.director import (
     build_update_system_prompt, build_update_user_prompt, parse_update_response,
     build_evaluate_system_prompt, build_evaluate_user_prompt, parse_evaluate_response,
     build_action_system_prompt, build_action_user_prompt, parse_action_response,
-    format_treatment_fidelity_summary, format_participant_hint,
+    format_participant_hint, format_participant_alignment_cell,
 )
 from agents.STAGE.performer import build_performer_system_prompt, build_performer_user_prompt
 from agents.STAGE.moderator import build_moderator_system_prompt, build_moderator_user_prompt, parse_moderator_response
@@ -223,6 +223,9 @@ class Orchestrator:
         self._agent_traits = agent_traits or {}
         self.participant_stance_hint = getattr(state, "participant_stance_hint", None)
         self._participant_hint_text = format_participant_hint(self.participant_stance_hint)
+        self._participant_alignment_cell_text = format_participant_alignment_cell(
+            self._participant_alignment_cell_live()
+        )
         self.classifier_prompt_template = (
             classifier_prompt_template
             if isinstance(classifier_prompt_template, str) and classifier_prompt_template.strip()
@@ -412,30 +415,170 @@ class Orchestrator:
             return "skeptical"
         return None
 
-    def _expected_like_minded_for_agent(self, agent_name: str) -> Optional[bool]:
-        """Infer the expected classifier alignment for an agent with fixed pool traits.
+    @classmethod
+    def _participant_alignment_cell_from_hint(cls, raw_stance: Optional[str]) -> Optional[str]:
+        """Map participant self-report to the experiment's valid alignment cells."""
+        stance = cls._normalize_participant_stance_hint(raw_stance)
+        if stance == "favor":
+            return "pro_policy_pro_topic"
+        if raw_stance and str(raw_stance).strip().lower() == "qualified_against":
+            return "anti_policy_pro_topic"
+        if stance == "against":
+            return "anti_policy_anti_topic"
+        return None
 
-        Ideology encodes measure stance: left=pro-measure, right=anti-measure.
-        Like-minded means the agent shares the participant's side.
+    @staticmethod
+    def _is_substantive_participant_message(content: Optional[str]) -> bool:
+        """Return True for participant messages that contain an actual stance signal."""
+        if not content:
+            return False
+        cleaned = " ".join(str(content).split()).strip()
+        if len(cleaned) < 12:
+            return False
+        return bool(re.search(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]", cleaned))
+
+    @classmethod
+    def _participant_alignment_cell_from_message(
+        cls,
+        message_text: Optional[str],
+    ) -> Optional[str]:
+        """Infer a participant alignment cell from one clear participant message.
+
+        This is intentionally conservative: it only returns a cell when the
+        message contains a strong enough cue to correct or refine the self-report.
+        Otherwise it returns None and the self-report remains in force.
         """
-        participant_stance = self._normalize_participant_stance_hint(self.participant_stance_hint)
-        if participant_stance is None:
+        if not message_text:
+            return None
+
+        text = " " .join(str(message_text).lower().split())
+
+        pro_policy_patterns = [
+            r"\bestoy a favor\b",
+            r"\bme parece bien\b",
+            r"\bme parece una buena medida\b",
+            r"\bestoy de acuerdo\b",
+            r"\bes un buen paso\b",
+            r"\bapoyo (?:el|la|esta|este)\b",
+            r"\bhay que apoyar\b",
+            r"\bbeneficia\b",
+        ]
+        anti_policy_patterns = [
+            r"\bestoy en contra\b",
+            r"\bno me convence\b",
+            r"\bme parece mal\b",
+            r"\bes una mala medida\b",
+            r"\bestá mal plantead[oa]\b",
+            r"\bes insuficiente\b",
+            r"\bse queda corto\b",
+            r"\bes una verg[üu]enza\b",
+            r"\bes una locura\b",
+            r"\bno funciona\b",
+        ]
+        pro_topic_patterns = [
+            r"\bla inmigraci[oó]n es un derecho\b",
+            r"\bhay que regularizar\b",
+            r"\bsoy pro inmigraci[oó]n\b",
+            r"\bcombatir el cambio clim[aá]tico\b",
+            r"\bhay que actuar contra el cambio clim[aá]tico\b",
+            r"\bel cambio clim[aá]tico es real\b",
+            r"\bhay que reducir emisiones\b",
+        ]
+        anti_topic_patterns = [
+            r"\bsobran inmigrantes\b",
+            r"\bdevolvedlos\b",
+            r"\bno necesitamos inmigraci[oó]n\b",
+            r"\befecto llamada\b",
+            r"\bel cambio clim[aá]tico es una farsa\b",
+            r"\bel cambio clim[aá]tico es un enga[ñn]o\b",
+            r"\bel cambio clim[aá]tico est[aá] exagerado\b",
+        ]
+
+        def _matches(patterns: List[str]) -> bool:
+            return any(re.search(pattern, text) for pattern in patterns)
+
+        pro_policy = _matches(pro_policy_patterns)
+        anti_policy = _matches(anti_policy_patterns)
+        pro_topic = _matches(pro_topic_patterns)
+        anti_topic = _matches(anti_topic_patterns)
+
+        if pro_policy and not anti_policy:
+            return "pro_policy_pro_topic"
+        if anti_policy and pro_topic and not anti_topic:
+            return "anti_policy_pro_topic"
+        if anti_policy and anti_topic and not pro_topic:
+            return "anti_policy_anti_topic"
+        return None
+
+    def _participant_alignment_cell_live(self) -> Optional[str]:
+        """Resolve participant cell from self-report, overridden by a clear first message."""
+        hint_cell = self._participant_alignment_cell_from_hint(self.participant_stance_hint)
+
+        participant_messages = [
+            message
+            for message in self.state.messages
+            if message.sender == self.state.user_name
+            and self._is_substantive_participant_message(message.content)
+        ]
+        if not participant_messages:
+            return hint_cell
+
+        first_message_cell = self._participant_alignment_cell_from_message(
+            participant_messages[0].content
+        )
+        return first_message_cell or hint_cell
+
+    @staticmethod
+    def _agent_alignment_cell_from_traits(traits: Dict[str, str]) -> Optional[str]:
+        """Return the agent's valid topic+policy alignment cell from fixed traits."""
+        explicit = str(traits.get("alignment_cell", "")).strip().lower()
+        if explicit in {
+            "pro_policy_pro_topic",
+            "anti_policy_pro_topic",
+            "anti_policy_anti_topic",
+        }:
+            return explicit
+
+        policy_stance = str(traits.get("policy_stance", "")).strip().lower()
+        topic_stance = str(traits.get("topic_stance", "")).strip().lower()
+        stance = str(traits.get("stance", "")).strip().lower()
+        ideology = str(traits.get("ideology", "")).strip().lower()
+
+        if not policy_stance:
+            if stance in {"agree", "support", "favor", "pro"}:
+                policy_stance = "pro_policy"
+            elif stance in {"disagree", "oppose", "against", "anti"}:
+                policy_stance = "anti_policy"
+            elif ideology == "left":
+                policy_stance = "pro_policy"
+            elif ideology == "right":
+                policy_stance = "anti_policy"
+
+        if not topic_stance:
+            if policy_stance == "pro_policy":
+                topic_stance = "pro_topic"
+            elif policy_stance == "anti_policy":
+                topic_stance = "anti_topic"
+
+        if policy_stance == "pro_policy" and topic_stance == "pro_topic":
+            return "pro_policy_pro_topic"
+        if policy_stance == "anti_policy" and topic_stance == "pro_topic":
+            return "anti_policy_pro_topic"
+        if policy_stance == "anti_policy" and topic_stance == "anti_topic":
+            return "anti_policy_anti_topic"
+        return None
+
+    def _expected_like_minded_for_agent(self, agent_name: str) -> Optional[bool]:
+        """Infer expected alignment from the participant cell and the agent cell."""
+        participant_cell = self._participant_alignment_cell_live()
+        if participant_cell is None:
             return None
 
         traits = self._agent_traits.get(agent_name) or {}
-        agent_ideology = self._normalize_agent_ideology(
-            traits.get("ideology") or traits.get("stance")
-        )
-        if agent_ideology is None or agent_ideology == "center":
+        agent_cell = self._agent_alignment_cell_from_traits(traits)
+        if agent_cell is None:
             return None
-
-        if participant_stance == "favor":
-            return agent_ideology == "left"
-        if participant_stance == "against":
-            return agent_ideology == "right"
-        if participant_stance == "skeptical":
-            return False
-        return None
+        return agent_cell == participant_cell
 
     def _message_contradicts_fixed_stance(
         self,
@@ -533,15 +676,57 @@ class Orchestrator:
         """Refresh the soft prior used in prompts and report summaries."""
         self.participant_stance_hint = participant_stance_hint
         self._participant_hint_text = format_participant_hint(participant_stance_hint)
+        self._participant_alignment_cell_text = format_participant_alignment_cell(
+            self._participant_alignment_cell_live()
+        )
 
     def _format_treatment_fidelity_summary(self) -> str:
-        """Summarise classifier-derived treatment fidelity across the session."""
+        """Summarise structural alignment plus observed incivility as simple percentages."""
         agent_messages = [
             message
             for message in self.state.messages
             if message.sender != self.state.user_name
         ]
-        return format_treatment_fidelity_summary(agent_messages)
+        if not agent_messages:
+            return "(No agent messages yet.)"
+
+        total = len(agent_messages)
+        expected_like = sum(
+            1
+            for message in agent_messages
+            if self._expected_like_minded_for_agent(message.sender) is True
+        )
+        expected_not_like = sum(
+            1
+            for message in agent_messages
+            if self._expected_like_minded_for_agent(message.sender) is False
+        )
+
+        classified_incivility = [message for message in agent_messages if message.is_incivil is not None]
+        incivil_count = sum(1 for message in classified_incivility if message.is_incivil)
+        civil_count = sum(1 for message in classified_incivility if message.is_incivil is False)
+
+        def _pct(count: int, base: int) -> str:
+            return f"{round((count / base) * 100)}%" if base > 0 else "0%"
+
+        lines = [
+            f"- Agent messages published: {total}",
+            f"- Like-minded messages so far: {expected_like}/{total} ({_pct(expected_like, total)})",
+            f"- Not-like-minded messages so far: {expected_not_like}/{total} ({_pct(expected_not_like, total)})",
+        ]
+        if classified_incivility:
+            lines.append(
+                f"- Incivil messages so far: {incivil_count}/{len(classified_incivility)} ({_pct(incivil_count, len(classified_incivility))})"
+            )
+            lines.append(
+                f"- Civil messages so far: {civil_count}/{len(classified_incivility)} ({_pct(civil_count, len(classified_incivility))})"
+            )
+        else:
+            lines.append("- Incivil messages so far: no classifier output yet")
+            lines.append("- Civil messages so far: no classifier output yet")
+        if total < 5:
+            lines.append("- Early window note: fewer than 5 agent messages have been published, so do not treat temporary imbalance as a serious failure yet.")
+        return "\n".join(lines)
 
     async def _classify_message(self, agent_message: str, agent_name: Optional[str] = None) -> Dict[str, Optional[object]]:
         """Run the post-moderation classifier stage for a generated message."""
@@ -612,6 +797,10 @@ class Orchestrator:
 
         Returns a TurnResult on success, or None if the cycle fails.
         """
+        self._participant_alignment_cell_text = format_participant_alignment_cell(
+            self._participant_alignment_cell_live()
+        )
+
         # 1. Gather recent messages, then anonymize.
         #    Action and Evaluate use separate window sizes; Update and human
         #    detection use the Action window (which contains the most recent message).
@@ -1329,6 +1518,7 @@ class Orchestrator:
                     incivility_framework=self.incivility_framework,
                 ),
                 participant_stance_hint=self._participant_hint_text,
+                participant_alignment_cell=self._participant_alignment_cell_text,
                 participant_name=self.state.user_name,
                 template=self.director_evaluate_prompt_template,
             )
@@ -1344,6 +1534,7 @@ class Orchestrator:
                 incivility_framework=self.incivility_framework,
             ),
             participant_stance_hint=self._participant_hint_text,
+            participant_alignment_cell=self._participant_alignment_cell_text,
             treatment_fidelity_summary=self._format_treatment_fidelity_summary(),
             action_counts=self._action_counts,
             performer_counts=self._performer_counts,
@@ -1408,6 +1599,7 @@ class Orchestrator:
                     incivility_framework=self.incivility_framework,
                 ),
                 participant_stance_hint=self._participant_hint_text,
+                participant_alignment_cell=self._participant_alignment_cell_text,
                 participant_name=self.state.user_name,
                 template=self.director_action_prompt_template,
             )
@@ -1432,6 +1624,7 @@ class Orchestrator:
                 incivility_framework=self.incivility_framework,
             ),
             participant_stance_hint=self._participant_hint_text,
+            participant_alignment_cell=self._participant_alignment_cell_text,
             treatment_fidelity_summary=self._format_treatment_fidelity_summary(),
             performer_counts=perf_counts,
             action_counts=self._action_counts,

@@ -1,18 +1,18 @@
-"""Orchestrator — coordinates the three-call Director + Performer + Moderator pipeline.
+﻿"""Orchestrator â€” coordinates the three-call Director + Performer + Moderator pipeline.
 
 Each turn:
   1. (Skip on first turn) Director Update: update last agent's profile
   2. Director Evaluate: assess validity criteria (every turn during warm-up,
      then every evaluate_interval turns once the first full interval completes)
   3. Director Action: select performer, action type, target, generate O/M/D
-     — If the Director selects the human participant, the turn short-circuits
+     â€” If the Director selects the human participant, the turn short-circuits
        here: Performer/Moderator are skipped, and the evaluate counter is
        not advanced (wait turns are not productive).
   4. Performer: generate message from agent profile + O/M/D + target message
   5. Moderator: extract clean content (retry up to 3 times)
 
 Agent profiles accumulate over the session, updated by the Update call.
-All names are anonymized before LLM calls and deanonymized in the output.
+Performer labels stay fixed for the full session and now use the agents' real names.
 """
 import asyncio
 import random
@@ -62,21 +62,14 @@ class TurnResult:
     action_rationale: Optional[str] = None
 
 
-# ── Anonymization helpers ────────────────────────────────────────────────────
+# â”€â”€ Anonymization helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def build_name_map(agent_names: List[str], user_name: str, rng: random.Random) -> Dict[str, str]:
-    """Build a shuffled mapping from real names to anonymous labels.
+    """Build a stable identity map for the session."""
+    del rng
+    all_names = list(agent_names) + [user_name]
+    return {name: name for name in all_names}
 
-    Agents are assigned "Performer 1", "Performer 2", … in a random order.
-    The human participant keeps their real name so agents can infer gender
-    and address them naturally.
-    """
-    shuffled = list(agent_names)
-    rng.shuffle(shuffled)
-    name_map = {name: f"Performer {i + 1}" for i, name in enumerate(shuffled)}
-    # Participant maps to their own name — not anonymized.
-    name_map[user_name] = user_name
-    return name_map
 
 
 def anonymize_message(msg: Message, name_map: Dict[str, str]) -> Message:
@@ -148,13 +141,13 @@ def _looks_truncated_response(text: Optional[str]) -> bool:
     if len(cleaned) < 200:
         return False
 
-    if re.search(r"[.!?…)\]\"'»”]\s*$", cleaned):
+    if re.search(r"[.!?â€¦)\]\"'Â»â€]\s*$", cleaned):
         return False
 
-    if cleaned.endswith(("😂", "🤣", "😭", "😡", "😤", "💸", "🔥", "🙏", "❤️", "♥")):
+    if cleaned.endswith(("ðŸ˜‚", "ðŸ¤£", "ðŸ˜­", "ðŸ˜¡", "ðŸ˜¤", "ðŸ’¸", "ðŸ”¥", "ðŸ™", "â¤ï¸", "â™¥")):
         return False
 
-    if cleaned.endswith((",", ";", ":", "-", "—", "(", "[", "{", "¿", "¡")):
+    if cleaned.endswith((",", ";", ":", "-", "â€”", "(", "[", "{", "Â¿", "Â¡")):
         return True
 
     if re.search(r"\b(?:y|o|pero|porque|que|si|aunque|cuando|donde|mientras|como)\s*$", cleaned, re.IGNORECASE):
@@ -162,7 +155,7 @@ def _looks_truncated_response(text: Optional[str]) -> bool:
 
     # If the message already contains sentence endings but stops on a bare
     # word, it is usually a length cut rather than an intentional style choice.
-    return bool(re.search(r"[.!?…].*[A-Za-zÁÉÍÓÚáéíóúÑñ0-9]\s*$", cleaned, re.DOTALL))
+    return bool(re.search(r"[.!?â€¦].*[A-Za-zÃÃ‰ÃÃ“ÃšÃ¡Ã©Ã­Ã³ÃºÃ‘Ã±0-9]\s*$", cleaned, re.DOTALL))
 
 
 def _merge_prompt_context(chatroom_context: str = "", incivility_framework: str = "") -> str:
@@ -265,7 +258,7 @@ class Orchestrator:
         self._anon_user = self._name_map[state.user_name]
 
         # Performer profiles: keyed by anonymous name, values are free-form text.
-        # Includes both agents and the human — the Director treats all as equal performers.
+        # Includes both agents and the human â€” the Director treats all as equal performers.
         # Seeded with each agent's persona (anonymized) so the Director knows their character
         # from turn 1; further accumulated via Director Update calls.
         self.agent_profiles: Dict[str, str] = {}
@@ -358,6 +351,33 @@ class Orchestrator:
         target_cell = self._agent_alignment_cell_from_traits(target_traits)
         return actor_cell is not None and actor_cell == target_cell
 
+    def _agents_have_different_alignment_cells(self, actor_name: Optional[str], target_name: Optional[str]) -> bool:
+        """Return True when both agents have known alignment cells and they differ."""
+        if not actor_name or not target_name or actor_name == target_name:
+            return False
+
+        actor_traits = self._agent_traits.get(actor_name) or {}
+        target_traits = self._agent_traits.get(target_name) or {}
+        actor_cell = self._agent_alignment_cell_from_traits(actor_traits)
+        target_cell = self._agent_alignment_cell_from_traits(target_traits)
+        return actor_cell is not None and target_cell is not None and actor_cell != target_cell
+
+    @staticmethod
+    def _looks_like_agent_validation(content: Optional[str]) -> bool:
+        """Heuristic guard for explicit agreement language between agents."""
+        if not content:
+            return False
+        normalized = " ".join(str(content).lower().split())
+        return bool(re.search(
+            r"\b("
+            r"exacto|exactamente|tal cual|totalmente de acuerdo|"
+            r"estoy de acuerdo|coincido|tienes raz[oÃ³]n|llevas raz[oÃ³]n|"
+            r"muy de acuerdo|completamente de acuerdo|"
+            r"eso mismo|justo eso|pienso igual|opino igual"
+            r")\b",
+            normalized,
+        ))
+
     @staticmethod
     def _normalize_participant_stance_hint(raw_stance: Optional[str]) -> Optional[str]:
         """Collapse participant stance hints to comparable buckets."""
@@ -399,7 +419,7 @@ class Orchestrator:
             r"\b("
             r"skeptical|skeptic|unsure|unclear|mixed|neutral|ambivalent|"
             r"doubt|doubts|doubtful|uncertain|concerned|reservations?|"
-            r"esc[eé]ptic|duda|dudas|reservas?"
+            r"esc[eÃ©]ptic|duda|dudas|reservas?"
             r")\b",
             normalized,
         ))
@@ -434,7 +454,7 @@ class Orchestrator:
         cleaned = " ".join(str(content).split()).strip()
         if len(cleaned) < 12:
             return False
-        return bool(re.search(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]", cleaned))
+        return bool(re.search(r"[A-Za-zÃÃ‰ÃÃ“ÃšÃ¡Ã©Ã­Ã³ÃºÃ‘Ã±]", cleaned))
 
     @classmethod
     def _participant_alignment_cell_from_message(
@@ -467,30 +487,30 @@ class Orchestrator:
             r"\bno me convence\b",
             r"\bme parece mal\b",
             r"\bes una mala medida\b",
-            r"\bestá mal plantead[oa]\b",
+            r"\bestÃ¡ mal plantead[oa]\b",
             r"\bes insuficiente\b",
             r"\bse queda corto\b",
-            r"\bes una verg[üu]enza\b",
+            r"\bes una verg[Ã¼u]enza\b",
             r"\bes una locura\b",
             r"\bno funciona\b",
         ]
         pro_topic_patterns = [
-            r"\bla inmigraci[oó]n es un derecho\b",
+            r"\bla inmigraci[oÃ³]n es un derecho\b",
             r"\bhay que regularizar\b",
-            r"\bsoy pro inmigraci[oó]n\b",
-            r"\bcombatir el cambio clim[aá]tico\b",
-            r"\bhay que actuar contra el cambio clim[aá]tico\b",
-            r"\bel cambio clim[aá]tico es real\b",
+            r"\bsoy pro inmigraci[oÃ³]n\b",
+            r"\bcombatir el cambio clim[aÃ¡]tico\b",
+            r"\bhay que actuar contra el cambio clim[aÃ¡]tico\b",
+            r"\bel cambio clim[aÃ¡]tico es real\b",
             r"\bhay que reducir emisiones\b",
         ]
         anti_topic_patterns = [
             r"\bsobran inmigrantes\b",
             r"\bdevolvedlos\b",
-            r"\bno necesitamos inmigraci[oó]n\b",
+            r"\bno necesitamos inmigraci[oÃ³]n\b",
             r"\befecto llamada\b",
-            r"\bel cambio clim[aá]tico es una farsa\b",
-            r"\bel cambio clim[aá]tico es un enga[ñn]o\b",
-            r"\bel cambio clim[aá]tico est[aá] exagerado\b",
+            r"\bel cambio clim[aÃ¡]tico es una farsa\b",
+            r"\bel cambio clim[aÃ¡]tico es un enga[Ã±n]o\b",
+            r"\bel cambio clim[aÃ¡]tico est[aÃ¡] exagerado\b",
         ]
 
         def _matches(patterns: List[str]) -> bool:
@@ -721,6 +741,78 @@ class Orchestrator:
         """Return True if the agent has already posted a message in this session."""
         return any(message.sender == agent_name for message in self.state.messages)
 
+    def _agent_messages_so_far(self) -> List[Message]:
+        """Return published agent messages, excluding the human participant."""
+        agent_names = {agent.name for agent in self.state.agents if agent.name != self.state.user_name}
+        return [
+            message
+            for message in self.state.messages
+            if message.sender in agent_names
+        ]
+
+    @staticmethod
+    def _format_turns_ago(distance: Optional[int]) -> str:
+        """Render a compact recency label for agent speaking turns."""
+        if distance is None:
+            return "never"
+        if distance == 0:
+            return "latest agent message"
+        if distance == 1:
+            return "1 agent message ago"
+        return f"{distance} agent messages ago"
+
+    def _format_participation_memory(
+        self,
+        eligible_anon_names: Optional[Set[str]] = None,
+    ) -> str:
+        """Build an explicit memory of who has spoken and how recently.
+
+        The Director needs two separate views:
+        - global speaker memory across all agents, to avoid false claims like
+          "has not spoken yet"
+        - eligible speakers this turn, so treatment filtering stays intact
+        """
+        agent_messages = self._agent_messages_so_far()
+        all_anon_agents = sorted(
+            anon_name
+            for anon_name in self._performer_counts.keys()
+            if anon_name != self._anon_user
+        )
+
+        last_index_by_real: Dict[str, int] = {}
+        count_by_real: Dict[str, int] = {}
+        for idx, message in enumerate(agent_messages):
+            count_by_real[message.sender] = count_by_real.get(message.sender, 0) + 1
+            last_index_by_real[message.sender] = idx
+
+        def _section(title: str, anon_names: List[str]) -> str:
+            lines = [title]
+            for anon_name in anon_names:
+                real_name = self._deanon_name(anon_name)
+                message_count = count_by_real.get(real_name, 0)
+                last_index = last_index_by_real.get(real_name)
+                last_spoke = self._format_turns_ago(
+                    None if last_index is None else len(agent_messages) - 1 - last_index
+                )
+                spoken = "yes" if message_count > 0 else "no"
+                lines.append(
+                    f"- {anon_name}: spoken={spoken}, messages={message_count}, last_spoke={last_spoke}"
+                )
+            return "\n".join(lines)
+
+        sections = [_section("Global speaker memory:", all_anon_agents)]
+
+        if eligible_anon_names is not None:
+            eligible_only = sorted(
+                anon_name
+                for anon_name in eligible_anon_names
+                if anon_name != self._anon_user
+            )
+            if eligible_only:
+                sections.append(_section("Eligible speakers this turn:", eligible_only))
+
+        return "\n\n".join(sections)
+
     def _count_room_wide_openers(self, agent_names: Set[str]) -> int:
         """Count first-turn room-wide opener messages already present in the session."""
         seen_speakers: Set[str] = set()
@@ -775,11 +867,7 @@ class Orchestrator:
 
     def _format_treatment_fidelity_summary(self) -> str:
         """Summarise structural alignment plus observed incivility as simple percentages."""
-        agent_messages = [
-            message
-            for message in self.state.messages
-            if message.sender != self.state.user_name
-        ]
+        agent_messages = self._agent_messages_so_far()
         if not agent_messages:
             return "(No agent messages yet.)"
 
@@ -798,6 +886,20 @@ class Orchestrator:
         classified_incivility = [message for message in agent_messages if message.is_incivil is not None]
         incivil_count = sum(1 for message in classified_incivility if message.is_incivil)
         civil_count = sum(1 for message in classified_incivility if message.is_incivil is False)
+        cell_order = [
+            "pro_policy_pro_topic",
+            "anti_policy_pro_topic",
+            "anti_policy_anti_topic",
+        ]
+        cell_counts: Dict[str, int] = {cell: 0 for cell in cell_order}
+        unknown_cell_count = 0
+        for message in agent_messages:
+            traits = self._agent_traits.get(message.sender) or {}
+            cell = self._agent_alignment_cell_from_traits(traits)
+            if cell in cell_counts:
+                cell_counts[cell] += 1
+            else:
+                unknown_cell_count += 1
 
         def _pct(count: int, base: int) -> str:
             return f"{round((count / base) * 100)}%" if base > 0 else "0%"
@@ -806,6 +908,12 @@ class Orchestrator:
             f"- Agent messages published: {total}",
             f"- Like-minded messages so far: {expected_like}/{total} ({_pct(expected_like, total)})",
             f"- Not-like-minded messages so far: {expected_not_like}/{total} ({_pct(expected_not_like, total)})",
+            "- Messages by alignment cell so far: "
+            + ", ".join(
+                f"{cell}={cell_counts[cell]}/{total} ({_pct(cell_counts[cell], total)})"
+                for cell in cell_order
+            )
+            + (f", unknown={unknown_cell_count}/{total} ({_pct(unknown_cell_count, total)})" if unknown_cell_count else ""),
         ]
         if classified_incivility:
             lines.append(
@@ -938,7 +1046,7 @@ class Orchestrator:
         internal_validity_criteria: str,
         allowed_performers: Optional[Set[str]] = None,
     ) -> Optional[TurnResult]:
-        """Run one full Update → Evaluate → Action → Performer → Moderator cycle.
+        """Run one full Update â†’ Evaluate â†’ Action â†’ Performer â†’ Moderator cycle.
 
         ``allowed_performers`` (real agent names) restricts which agents the
         Director can select in parallel mode, preventing duplicate picks.
@@ -959,16 +1067,16 @@ class Orchestrator:
         anon_recent_action = [anonymize_message(m, self._name_map) for m in recent_action]
 
         # 1b. Detect if the human posted since the last orchestrator turn.
-        #     Do NOT treat the participant as a performer for Update purposes —
+        #     Do NOT treat the participant as a performer for Update purposes â€”
         #     the Director cannot instruct the human, and running Update on their
         #     message causes the Director to try to "correct" them in Action.
         if anon_recent_action and anon_recent_action[-1].sender == self._anon_user:
             self._last_action_type = "message"
             # Leave _last_agent unchanged so Update still targets the previous agent.
 
-        # 2. Director Update (skip on first turn — nothing to assess)
+        # 2. Director Update (skip on first turn â€” nothing to assess)
         if anon_recent_action and self._last_agent and self._last_agent != self._anon_user:
-            # Skip Update for likes — they aren't significant enough for a profile revision.
+            # Skip Update for likes â€” they aren't significant enough for a profile revision.
             if self._last_action_type != "like":
                 await self._director_update(anon_recent_action)
 
@@ -1046,7 +1154,7 @@ class Orchestrator:
         #     addresses a specific agent that has NOT yet replied to it, force
         #     that agent to reply.  We scan backwards through the window to find
         #     the latest participant message, then check whether any agent has
-        #     already responded after it — if so, the obligation is discharged.
+        #     already responded after it â€” if so, the obligation is discharged.
         addressed_agent = None
         pending_human_msg = None
         agent_names = {a.name for a in agents if a.name != self.state.user_name}
@@ -1055,7 +1163,7 @@ class Orchestrator:
             if msg.sender == self.state.user_name:
                 pending_human_msg = msg
                 break
-            # An agent replied after the participant's message — obligation discharged.
+            # An agent replied after the participant's message â€” obligation discharged.
             if msg.sender in agent_names:
                 break
 
@@ -1094,7 +1202,7 @@ class Orchestrator:
             action_data["target_user"] = None
             action_data["performer_instruction"] = {
                 "objective": f"Reply directly to {self.state.user_name}'s message addressed to you.",
-                "motivation": f"{self.state.user_name} addressed you specifically — not replying would feel rude and unnatural.",
+                "motivation": f"{self.state.user_name} addressed you specifically â€” not replying would feel rude and unnatural.",
                 "directive": "Keep it conversational and on-topic; stay true to your fixed stance and character.",
             }
 
@@ -1170,13 +1278,15 @@ class Orchestrator:
             action_type = "message"
             action_data["action_type"] = "message"
             target_user = None
-            # Clear the @mention instruction — the performer now posts a standalone message.
+            # Clear the @mention instruction â€” the performer now posts a standalone message.
             if action_data.get("performer_instruction"):
                 action_data["performer_instruction"] = {
                     "objective": action_data["performer_instruction"].get("objective", "Post a message to the chatroom."),
                     "motivation": action_data["performer_instruction"].get("motivation", ""),
                     "directive": action_data["performer_instruction"].get("directive", "Stay true to your fixed stance and character."),
                 }
+
+        cross_cell_target = None
 
         # 3c. Prevent direct infighting between agents in the same alignment cell.
         if action_type in {"reply", "@mention", "message"}:
@@ -1207,8 +1317,49 @@ class Orchestrator:
                     "motivation": "You occupy the same alignment cell, so infighting would feel incoherent and weaken the discussion.",
                     "directive": "Sound supportive or additive; do not criticize, mock, or challenge agents who share your alignment cell.",
                 }
+            else:
+                if target_user and self._agents_have_different_alignment_cells(agent_name, target_user):
+                    cross_cell_target = target_user
+                elif target_message_id and target_message_id:
+                    target_msg_for_guard = next(
+                        (m for m in self.state.messages if m.message_id == target_message_id),
+                        None,
+                    )
+                    if (
+                        target_msg_for_guard
+                        and self._agents_have_different_alignment_cells(agent_name, target_msg_for_guard.sender)
+                    ):
+                        cross_cell_target = target_msg_for_guard.sender
 
-        # 3b. Handle 'wait' — Director selected the human participant.
+                if cross_cell_target:
+                    existing_instruction = dict(action_data.get("performer_instruction") or {})
+                    directive = (existing_instruction.get("directive") or "").strip()
+                    contrastive_clause = (
+                        "You are addressing an agent from a different alignment cell: do not agree with, praise, "
+                        "validate, echo, or pile on in support of them. If you engage, make the contrast between "
+                        "your cell and theirs explicit."
+                    )
+                    existing_instruction["directive"] = (
+                        f"{directive} {contrastive_clause}".strip()
+                        if directive else contrastive_clause
+                    )
+                    action_data["performer_instruction"] = existing_instruction
+
+        if action_type in {"reply", "@mention", "message"} and target_user == self.state.user_name:
+            if self._expected_like_minded_for_agent(agent_name) is True:
+                existing_instruction = dict(action_data.get("performer_instruction") or {})
+                directive = (existing_instruction.get("directive") or "").strip()
+                support_clause = (
+                    "Your alignment cell matches the participant's current cell: do not attack, blame, mock, or "
+                    "undermine the participant. You may defend them, reinforce them, or sharpen their shared case."
+                )
+                existing_instruction["directive"] = (
+                    f"{directive} {support_clause}".strip()
+                    if directive else support_clause
+                )
+                action_data["performer_instruction"] = existing_instruction
+
+        # 3b. Handle 'wait' â€” Director selected the human participant.
         #     Skip Performer/Moderator and restore evaluate counter
         #     (wait turns are not productive turns).
         if agent_name == self.state.user_name:
@@ -1298,7 +1449,7 @@ class Orchestrator:
                 action_rationale=action_rationale,
             )
 
-        # 5. Performer → Moderator loop (max MAX_PERFORMER_RETRIES attempts)
+        # 5. Performer â†’ Moderator loop (max MAX_PERFORMER_RETRIES attempts)
         performer_instruction = action_data.get("performer_instruction", {})
 
         # Get the selected agent's profile and restore real names for the performer.
@@ -1318,7 +1469,7 @@ class Orchestrator:
                 None,
             )
         elif action_type == "message" and target_user:
-            # Director chose a targeted message but no explicit message_id —
+            # Director chose a targeted message but no explicit message_id â€”
             # resolve the target user's most recent message.
             for m in reversed(self.state.messages):
                 if m.sender == target_user:
@@ -1345,7 +1496,7 @@ class Orchestrator:
                         break
             recent_by_others.reverse()
 
-        # Get agent's raw persona for the performer (not anonymized — performer knows their own character)
+        # Get agent's raw persona for the performer (not anonymized â€” performer knows their own character)
         agent_obj = next((a for a in agents if a.name == agent_name), None)
         agent_persona = (agent_obj.persona or None) if agent_obj else None
 
@@ -1371,7 +1522,6 @@ class Orchestrator:
         mentions = None
         reply_to = None
         quoted_text = None
-        stance_retry_count = 0
 
         # Build (or retrieve cached) per-agent performer system prompt.
         if agent_name not in self._performer_system_prompts:
@@ -1495,47 +1645,31 @@ class Orchestrator:
                 if target_message:
                     candidate_quoted_text = target_message.content
 
-            # Stance guard: only classify when a fixed-stance check is possible,
-            # to avoid burning tokens on messages that will be discarded anyway.
-            # Classification for the final approved message happens after the loop.
-            if self._expected_like_minded_for_agent(agent_name) is not None:
-                pre_classification = await self._classify_message(agent_message=candidate_content, agent_name=agent_name)
-                if self._message_contradicts_fixed_stance(agent_name, pre_classification):
-                    expected_like_minded = self._expected_like_minded_for_agent(agent_name)
-                    actual_like_minded = pre_classification.get("is_like_minded")
-                    if stance_retry_count < MAX_STANCE_RETRIES:
-                        stance_retry_count += 1
-                        self.logger.log_error(
-                            "performer_stance_mismatch_retry",
-                            f"Generated message contradicted fixed stance for '{agent_name}'; retrying once",
-                            context={
-                                "expected_like_minded": expected_like_minded,
-                                "actual_like_minded": actual_like_minded,
-                                "action_type": action_type,
-                            },
-                        )
-                        performer_user_prompt = (
-                            f"{base_performer_user_prompt}\n\n"
-                            "Important correction:\n"
-                            "Your last draft contradicted your fixed stance on the topic.\n"
-                            "Rewrite it so it clearly stays ideologically consistent with your fixed position, "
-                            "while keeping the same action type, target, tone, and overall objective.\n"
-                            "Do not hedge or sound neutral if that would blur your stance."
-                        )
-                        content = None
-                        continue
+            target_agent_for_validation = None
+            if target_user and target_user != self.state.user_name:
+                target_agent_for_validation = target_user
+            elif target_message and target_message.sender != self.state.user_name:
+                target_agent_for_validation = target_message.sender
 
-                    self.logger.log_error(
-                        "performer_stance_mismatch_exhausted",
-                        f"Generated message for '{agent_name}' still contradicted fixed stance after retry; skipping turn",
-                        context={
-                            "expected_like_minded": expected_like_minded,
-                            "actual_like_minded": actual_like_minded,
-                            "action_type": action_type,
-                        },
-                    )
-                    content = None
-                    break
+            if (
+                target_agent_for_validation
+                and self._agents_have_different_alignment_cells(agent_name, target_agent_for_validation)
+                and self._looks_like_agent_validation(candidate_content)
+            ):
+                self.logger.log_error(
+                    "performer_cross_cell_validation_retry",
+                    f"Generated message for '{agent_name}' validated '{target_agent_for_validation}' across alignment cells; retrying",
+                    context={"action_type": action_type},
+                )
+                performer_user_prompt = (
+                    f"{base_performer_user_prompt}\n\n"
+                    "Important correction:\n"
+                    "Your last draft sounded validating toward an agent from a different alignment cell.\n"
+                    "Rewrite it so you stay clearly inside your own cell. You may attack the same opponent or "
+                    "respond to the same topic, but do not agree with, praise, echo, or pile on in support of the target."
+                )
+                content = None
+                continue
 
             content = candidate_content
             mentions = candidate_mentions
@@ -1598,7 +1732,7 @@ class Orchestrator:
             action_rationale=action_rationale,
         )
 
-    # ── Director Update (Call 1) ──────────────────────────────────────────────
+    # â”€â”€ Director Update (Call 1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def _director_update(self, anon_recent: List[Message]) -> None:
         """Run Director Update call: update last agent's profile.
@@ -1659,7 +1793,7 @@ class Orchestrator:
         if self._last_agent and self._last_agent in self.agent_profiles:
             self.agent_profiles[self._last_agent] = update_data["performer_profile_update"]
 
-    # ── Director Evaluate (Call 2) ────────────────────────────────────────────
+    # â”€â”€ Director Evaluate (Call 2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def _director_evaluate(self, internal_validity_criteria: str, anon_recent: List[Message]) -> None:
         """Run Director Evaluate call: revise validity evaluations.
@@ -1696,6 +1830,7 @@ class Orchestrator:
             treatment_fidelity_summary=self._format_treatment_fidelity_summary(),
             action_counts=self._action_counts,
             performer_counts=self._performer_counts,
+            participation_summary=self._format_participation_memory(),
             exclude_performer=self._anon_user,
             template=self.director_evaluate_prompt_template,
         )
@@ -1730,7 +1865,7 @@ class Orchestrator:
         self._internal_validity_summary = evaluate_data["internal_validity_evaluation"]
         self._ecological_validity_summary = evaluate_data["ecological_validity_evaluation"]
 
-    # ── Director Action (Call 3) ──────────────────────────────────────────────
+    # â”€â”€ Director Action (Call 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def _director_action(
         self,
@@ -1764,6 +1899,7 @@ class Orchestrator:
 
         profiles = override_profiles if override_profiles is not None else self.agent_profiles
         perf_counts = override_perf_counts if override_perf_counts is not None else self._performer_counts
+        eligible_anon_names = set(profiles.keys())
         anon_traits = None
         if self._agent_traits:
             anon_traits = {
@@ -1785,6 +1921,9 @@ class Orchestrator:
             participant_alignment_cell=self._participant_alignment_cell_text,
             treatment_fidelity_summary=self._format_treatment_fidelity_summary(),
             performer_counts=perf_counts,
+            participation_summary=self._format_participation_memory(
+                eligible_anon_names=eligible_anon_names,
+            ),
             action_counts=self._action_counts,
             exclude_performer=self._anon_user,
             agent_traits=anon_traits,
@@ -1793,7 +1932,7 @@ class Orchestrator:
 
         # Retry loop: Director Action is the most critical call in the pipeline.
         # On empty response or unparseable JSON, retry with short exponential backoff
-        # before giving up — this handles cold-start timeouts and transient API errors
+        # before giving up â€” this handles cold-start timeouts and transient API errors
         # that are especially common at session start.
         MAX_ACTION_ATTEMPTS = 3
         BACKOFF_SECONDS = [0, 2, 5]  # delay before attempt 1, 2, 3
@@ -1826,7 +1965,7 @@ class Orchestrator:
                 continue
 
             try:
-                return parse_action_response(action_raw)
+                action_data = parse_action_response(action_raw)
             except ValueError as e:
                 self.logger.log_error(
                     "director_action_parse",
@@ -1834,8 +1973,30 @@ class Orchestrator:
                 )
                 continue
 
+            selected_performer = action_data.get("next_performer")
+            if selected_performer not in profiles:
+                self.logger.log_error(
+                    "director_action_unknown_performer_label",
+                    f"attempt {attempt + 1}/{MAX_ACTION_ATTEMPTS}: Director returned next_performer '{selected_performer}', "
+                    "which is not one of the visible performer labels in AGENT_PROFILES",
+                )
+                continue
+
+            selected_target_user = action_data.get("target_user")
+            if selected_target_user and selected_target_user not in profiles:
+                self.logger.log_error(
+                    "director_action_unknown_target_label",
+                    f"attempt {attempt + 1}/{MAX_ACTION_ATTEMPTS}: Director returned target_user '{selected_target_user}', "
+                    "which is not one of the visible performer labels in AGENT_PROFILES",
+                )
+                continue
+
+            return action_data
+
         self.logger.log_error(
             "director_action_failed",
-            f"Director Action gave no valid response after {MAX_ACTION_ATTEMPTS} attempts — skipping turn",
+            f"Director Action gave no valid response after {MAX_ACTION_ATTEMPTS} attempts â€” skipping turn",
         )
         return None
+
+

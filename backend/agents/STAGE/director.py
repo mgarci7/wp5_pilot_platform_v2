@@ -342,6 +342,7 @@ def build_evaluate_user_prompt(
     treatment_fidelity_summary: str = "",
     action_counts: Optional[Dict[str, int]] = None,
     performer_counts: Optional[Dict[str, int]] = None,
+    participation_summary: str = "",
     exclude_performer: Optional[str] = None,
     template: Optional[str] = None,
 ) -> str:
@@ -350,7 +351,13 @@ def build_evaluate_user_prompt(
     prev_internal = previous_internal or "No actions have occurred yet. No assessment available."
     prev_ecological = previous_ecological or "No actions have occurred yet. No assessment available."
     action_summary = format_action_summary(action_counts) if action_counts else "(No actions yet)"
-    participation_summary = format_participation_summary(performer_counts, exclude_performer=exclude_performer) if performer_counts else "(No actions yet)"
+    participation_summary = (
+        participation_summary
+        or (
+            format_participation_summary(performer_counts, exclude_performer=exclude_performer)
+            if performer_counts else "(No actions yet)"
+        )
+    )
 
     raw = template if (isinstance(template, str) and template.strip()) else _EVALUATE_TEMPLATE
     prompt = _render_prompt(raw, "user")
@@ -425,6 +432,7 @@ def build_action_user_prompt(
     treatment_fidelity_summary: str = "",
     performer_counts: Optional[Dict[str, int]] = None,
     action_counts: Optional[Dict[str, int]] = None,
+    participation_summary: str = "",
     exclude_performer: Optional[str] = None,
     agent_traits: Optional[Dict[str, Dict[str, str]]] = None,
     template: Optional[str] = None,
@@ -432,7 +440,13 @@ def build_action_user_prompt(
     """Build the Director Action user prompt with dynamic data."""
     chat_log = format_chat_log(messages)
     profiles_str = format_agent_profiles(agent_profiles, traits=agent_traits)
-    participation_summary = format_participation_summary(performer_counts, exclude_performer=exclude_performer) if performer_counts else "(No actions yet)"
+    participation_summary = (
+        participation_summary
+        or (
+            format_participation_summary(performer_counts, exclude_performer=exclude_performer)
+            if performer_counts else "(No actions yet)"
+        )
+    )
     action_summary = format_action_summary(action_counts) if action_counts else "(No actions yet)"
 
     raw = template if (isinstance(template, str) and template.strip()) else _ACTION_TEMPLATE

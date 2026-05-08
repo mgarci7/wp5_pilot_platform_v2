@@ -28,6 +28,7 @@ from agents.STAGE.director import (
     build_evaluate_system_prompt, build_evaluate_user_prompt, parse_evaluate_response,
     build_action_system_prompt, build_action_user_prompt, parse_action_response,
     format_participant_hint, format_participant_alignment_cell,
+    format_target_constraints_by_speaker,
 )
 from agents.STAGE.performer import build_performer_system_prompt, build_performer_user_prompt
 from agents.STAGE.moderator import build_moderator_system_prompt, build_moderator_user_prompt, parse_moderator_response
@@ -42,6 +43,7 @@ from agents.STAGE.classifier import (
 MAX_PERFORMER_RETRIES = 3
 MAX_STANCE_RETRIES = 1
 MAX_ROOM_WIDE_OPENERS = 2
+TARGET_ELIGIBLE_SPEAKER_COUNT = 4
 
 
 @dataclass
@@ -633,10 +635,13 @@ class Orchestrator:
         internal_validity_criteria: str,
         candidate_agent_names: Set[str],
     ) -> Set[str]:
-        """Restrict the Director's candidate pool to the side/tone currently needed most.
+        """Return a ranked subset of candidates, preserving some flexibility.
 
-        This turns alignment and civility treatment rules into a hard pre-filter
-        rather than a soft prompt instruction.
+        We still prioritize the side/tone currently needed most, but we avoid
+        collapsing the visible set to 1-2 names whenever possible. This gives
+        the Director a realistic choice set and reduces retry loops caused by
+        global speaker memory mentioning agents that are technically valid but
+        not in an over-tight exact-match subset.
         """
         candidates = {
             name for name in candidate_agent_names
@@ -655,7 +660,11 @@ class Orchestrator:
         ]
         total_messages = len(agent_messages)
 
-        filtered = set(candidates)
+        if len(candidates) <= TARGET_ELIGIBLE_SPEAKER_COUNT:
+            return candidates
+
+        preferred_like_value: Optional[bool] = None
+        preferred_civility: Optional[str] = None
 
         if total_messages > 0 and like_target is not None and not_like_target is not None:
             like_count = sum(
@@ -672,13 +681,7 @@ class Orchestrator:
             not_like_gap = not_like_target - current_not_like_pct
 
             if like_gap > 0 or not_like_gap > 0:
-                target_like_value = True if like_gap >= not_like_gap else False
-                alignment_filtered = {
-                    name for name in filtered
-                    if self._expected_like_minded_for_agent(name) is target_like_value
-                }
-                if alignment_filtered:
-                    filtered = alignment_filtered
+                preferred_like_value = True if like_gap >= not_like_gap else False
 
         classified_incivility = [message for message in agent_messages if message.is_incivil is not None]
         if classified_incivility and incivil_target is not None:
@@ -691,15 +694,80 @@ class Orchestrator:
             civil_gap = civil_target - current_civil_pct
 
             if incivil_gap > 0 or civil_gap > 0:
-                target_civility = "uncivil" if incivil_gap >= civil_gap else "civil"
-                civility_filtered = {
-                    name for name in filtered
-                    if self._agent_civility_bucket(name) == target_civility
-                }
-                if civility_filtered:
-                    filtered = civility_filtered
+                preferred_civility = "uncivil" if incivil_gap >= civil_gap else "civil"
 
-        return filtered or candidates
+        last_index_by_real: Dict[str, int] = {}
+        count_by_real: Dict[str, int] = {}
+        for idx, message in enumerate(agent_messages):
+            count_by_real[message.sender] = count_by_real.get(message.sender, 0) + 1
+            last_index_by_real[message.sender] = idx
+
+        def _rank_key(name: str) -> tuple[int, int, int, int, str]:
+            score = 0
+
+            if preferred_like_value is not None and self._expected_like_minded_for_agent(name) is preferred_like_value:
+                score += 4
+            if preferred_civility is not None and self._agent_civility_bucket(name) == preferred_civility:
+                score += 3
+
+            message_count = count_by_real.get(name, 0)
+            if message_count == 0:
+                score += 2
+            else:
+                last_index = last_index_by_real.get(name)
+                turns_ago = len(agent_messages) - 1 - last_index if last_index is not None else 0
+                if turns_ago >= 3:
+                    score += 1
+
+            last_index = last_index_by_real.get(name)
+            turns_ago = len(agent_messages) - 1 - last_index if last_index is not None else 10_000
+            never_spoken = 1 if message_count == 0 else 0
+            return (score, never_spoken, turns_ago, -message_count, name)
+
+        ranked = sorted(candidates, key=_rank_key, reverse=True)
+        return set(ranked[:TARGET_ELIGIBLE_SPEAKER_COUNT]) or candidates
+
+    def _sanitize_summary_for_eligible_agents(
+        self,
+        summary: str,
+        eligible_anon_names: Set[str],
+    ) -> str:
+        """Remove concrete agent-name suggestions that are not eligible this turn."""
+        if not summary:
+            return summary
+
+        eligible = {name for name in eligible_anon_names if name != self._anon_user}
+        if not eligible:
+            return summary
+
+        all_agent_names = {
+            anon_name
+            for anon_name in self._performer_counts.keys()
+            if anon_name != self._anon_user
+        }
+        ineligible = sorted(all_agent_names - eligible, key=len, reverse=True)
+
+        sanitized = summary
+        for anon_name in ineligible:
+            sanitized = re.sub(rf"\b{re.escape(anon_name)}\b", "another eligible agent", sanitized)
+
+        sanitized = re.sub(
+            r"another eligible agent(?:\s*/\s*another eligible agent)+",
+            "another eligible agent",
+            sanitized,
+        )
+        sanitized = re.sub(
+            r"another eligible agent(?:,\s*another eligible agent)+",
+            "eligible agents",
+            sanitized,
+        )
+        sanitized = re.sub(
+            r"\(\s*e\.g\.,\s*another eligible agent(?:\s+or\s+another eligible agent)?\s*\)",
+            "(e.g., an eligible agent)",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        return sanitized
 
     def _message_contradicts_fixed_stance(
         self,
@@ -847,6 +915,90 @@ class Orchestrator:
                 continue
             return message
         return None
+
+    def _can_directly_target_message(self, actor_name: str, message: Message) -> bool:
+        """Return True when a message is a coherent direct target for this actor."""
+        if not message or message.sender in {actor_name, "[news]"}:
+            return False
+        if message.sender == self.state.user_name:
+            return True
+        return not self._agents_share_alignment_cell(actor_name, message.sender)
+
+    def _find_best_direct_target_message(
+        self,
+        actor_name: str,
+        recent_messages: List[Message],
+        exclude_senders: Optional[Set[str]] = None,
+    ) -> Optional[Message]:
+        """Pick the best recent message this actor can target directly."""
+        excluded = exclude_senders or set()
+        for message in reversed(recent_messages):
+            if message.sender in excluded:
+                continue
+            if self._can_directly_target_message(actor_name, message):
+                return message
+        for message in reversed(self.state.messages):
+            if message.sender in excluded:
+                continue
+            if self._can_directly_target_message(actor_name, message):
+                return message
+        return None
+
+    def _find_latest_message_anchor(
+        self,
+        actor_name: str,
+        recent_messages: List[Message],
+    ) -> Optional[Message]:
+        """Return the latest coherent message a plain `message` could naturally answer."""
+        if recent_messages:
+            latest = recent_messages[-1]
+            if self._can_directly_target_message(actor_name, latest):
+                return latest
+
+        for message in reversed(self.state.messages):
+            if self._can_directly_target_message(actor_name, message):
+                return message
+        return None
+
+    def _format_target_constraints_by_speaker(
+        self,
+        eligible_anon_names: Set[str],
+        recent_messages: List[Message],
+    ) -> str:
+        """Describe valid direct targets and best reply anchors per eligible speaker."""
+        visible_speakers = sorted(
+            anon_name for anon_name in eligible_anon_names
+            if anon_name != self._anon_user
+        )
+        if not visible_speakers:
+            return "(No speaker-specific target constraints available.)"
+
+        constraints: Dict[str, Dict[str, object]] = {}
+        for speaker_anon in visible_speakers:
+            speaker_real = self._deanon_name(speaker_anon)
+            valid_targets: List[str] = []
+            forbidden_targets: List[str] = []
+            for target_anon in visible_speakers:
+                if target_anon == speaker_anon:
+                    continue
+                target_real = self._deanon_name(target_anon)
+                if self._agents_share_alignment_cell(speaker_real, target_real):
+                    forbidden_targets.append(target_anon)
+                else:
+                    valid_targets.append(target_anon)
+
+            best_anchor = self._find_best_direct_target_message(speaker_real, recent_messages)
+            best_anchor_text = None
+            if best_anchor is not None:
+                best_anchor_text = f"{best_anchor.sender} [{best_anchor.message_id}]"
+
+            constraints[speaker_anon] = {
+                "valid_targets": valid_targets,
+                "forbidden_targets": forbidden_targets,
+                "best_reply_anchor": best_anchor_text,
+            }
+
+        return format_target_constraints_by_speaker(constraints)
 
     @staticmethod
     def _trailing_speaker_streak(messages: List[Message], agent_names: Set[str]) -> tuple[Optional[str], int]:
@@ -1142,6 +1294,7 @@ class Orchestrator:
 
         action_data = await self._director_action(
             anon_recent_action,
+            real_recent=recent_action,
             override_profiles=action_profiles,
             override_perf_counts=action_perf_counts,
         )
@@ -1214,12 +1367,14 @@ class Orchestrator:
                 "directive": "Keep it conversational and on-topic; stay true to your fixed stance and character.",
             }
 
-        is_room_wide_opener = (
+        latest_message_anchor = self._find_latest_message_anchor(agent_name, recent_action)
+        is_true_room_wide_opener = (
             action_type == "message"
             and not target_user
             and not target_message_id
+            and latest_message_anchor is None
         )
-        if is_room_wide_opener and not (disallowed_speaker and agent_name == disallowed_speaker):
+        if is_true_room_wide_opener and not (disallowed_speaker and agent_name == disallowed_speaker):
             is_first_turn_for_agent = not self._agent_has_spoken_before(agent_name)
             existing_room_wide_openers = self._count_room_wide_openers(agent_names)
             previous_was_room_wide_opener = self._last_message_was_room_wide_opener(agent_names)
@@ -1229,7 +1384,9 @@ class Orchestrator:
                 or previous_was_room_wide_opener
             )
             if room_wide_violation:
-                anchor_message = self._find_room_wide_anchor_message(agent_name)
+                anchor_message = self._find_best_direct_target_message(agent_name, recent_action)
+                if anchor_message is None:
+                    anchor_message = self._find_room_wide_anchor_message(agent_name)
                 if anchor_message is None:
                     self.logger.log_error(
                         "director_room_wide_opener_blocked",
@@ -1258,7 +1415,7 @@ class Orchestrator:
                 action_data["performer_instruction"] = {
                     "objective": f"Join the ongoing thread by responding to {anchor_message.sender}'s recent message.",
                     "motivation": "A fresh room-wide statement here would make the chat feel disjointed, so anchor yourself to the existing conversation.",
-                    "directive": "Reply directly and conversationally to the quoted message instead of posting a general statement to the room.",
+                    "directive": "Reply directly and conversationally to the quoted message instead of posting a general statement to the room. Keep the target coherent with your alignment cell.",
                 }
 
         if disallowed_speaker and agent_name == disallowed_speaker:
@@ -1310,21 +1467,43 @@ class Orchestrator:
                     same_side_target = target_msg_for_guard.sender
 
             if same_side_target:
-                self.logger.log_error(
-                    "director_same_side_target",
-                    f"Director targeted same-cell agents '{agent_name}' -> '{same_side_target}'; converting to a non-targeted message",
+                retarget_message = self._find_best_direct_target_message(
+                    agent_name,
+                    recent_action,
+                    exclude_senders={same_side_target, agent_name},
                 )
-                action_type = "message"
-                action_data["action_type"] = "message"
-                target_user = None
-                action_data["target_user"] = None
-                target_message_id = None
-                action_data["target_message_id"] = None
-                action_data["performer_instruction"] = {
-                    "objective": "Reinforce your cell's position without attacking allied agents.",
-                    "motivation": "You occupy the same alignment cell, so infighting would feel incoherent and weaken the discussion.",
-                    "directive": "Sound supportive or additive; do not criticize, mock, or challenge agents who share your alignment cell.",
-                }
+                if retarget_message is not None:
+                    self.logger.log_error(
+                        "director_same_side_target",
+                        f"Director targeted same-cell agents '{agent_name}' -> '{same_side_target}'; redirecting to reply to '{retarget_message.sender}'",
+                    )
+                    action_type = "reply"
+                    action_data["action_type"] = "reply"
+                    target_user = None
+                    action_data["target_user"] = None
+                    target_message_id = retarget_message.message_id
+                    action_data["target_message_id"] = target_message_id
+                    action_data["performer_instruction"] = {
+                        "objective": f"Push your cell's position by responding to {retarget_message.sender} instead of attacking an allied same-cell agent.",
+                        "motivation": "You share a fixed alignment cell with the originally targeted agent, so infighting would be incoherent; redirect your energy toward a valid opposing or participant message.",
+                        "directive": "Reply directly to the quoted message. Do not criticize, mock, or challenge agents who share your alignment cell.",
+                    }
+                else:
+                    self.logger.log_error(
+                        "director_same_side_target",
+                        f"Director targeted same-cell agents '{agent_name}' -> '{same_side_target}'; converting to a non-targeted message",
+                    )
+                    action_type = "message"
+                    action_data["action_type"] = "message"
+                    target_user = None
+                    action_data["target_user"] = None
+                    target_message_id = None
+                    action_data["target_message_id"] = None
+                    action_data["performer_instruction"] = {
+                        "objective": "Reinforce your cell's position without attacking allied agents.",
+                        "motivation": "You occupy the same alignment cell, so infighting would feel incoherent and weaken the discussion.",
+                        "directive": "Sound supportive or additive; do not criticize, mock, or challenge agents who share your alignment cell.",
+                    }
             else:
                 if target_user and self._agents_have_different_alignment_cells(agent_name, target_user):
                     cross_cell_target = target_user
@@ -1878,6 +2057,7 @@ class Orchestrator:
     async def _director_action(
         self,
         anon_recent: List[Message],
+        real_recent: Optional[List[Message]] = None,
         override_profiles: Optional[Dict[str, str]] = None,
         override_perf_counts: Optional[Dict[str, int]] = None,
     ) -> Optional[dict]:
@@ -1908,6 +2088,15 @@ class Orchestrator:
         profiles = override_profiles if override_profiles is not None else self.agent_profiles
         perf_counts = override_perf_counts if override_perf_counts is not None else self._performer_counts
         eligible_anon_names = set(profiles.keys())
+        recent_messages = real_recent if real_recent is not None else self.state.get_recent_messages(len(anon_recent))
+        sanitized_internal_summary = self._sanitize_summary_for_eligible_agents(
+            self._internal_validity_summary or "No actions have occurred yet. No assessment available.",
+            eligible_anon_names,
+        )
+        sanitized_ecological_summary = self._sanitize_summary_for_eligible_agents(
+            self._ecological_validity_summary or "No actions have occurred yet. No assessment available.",
+            eligible_anon_names,
+        )
         anon_traits = None
         if self._agent_traits:
             anon_traits = {
@@ -1919,8 +2108,8 @@ class Orchestrator:
         action_user = build_action_user_prompt(
             messages=anon_recent,
             agent_profiles=profiles,
-            internal_validity_summary=self._internal_validity_summary or "No actions have occurred yet. No assessment available.",
-            ecological_validity_summary=self._ecological_validity_summary or "No actions have occurred yet. No assessment available.",
+            internal_validity_summary=sanitized_internal_summary,
+            ecological_validity_summary=sanitized_ecological_summary,
             chatroom_context=_merge_prompt_context(
                 chatroom_context=self.chatroom_context,
                 incivility_framework=self.incivility_framework,
@@ -1932,11 +2121,28 @@ class Orchestrator:
             participation_summary=self._format_participation_memory(
                 eligible_anon_names=eligible_anon_names,
             ),
+            target_constraints_by_speaker=self._format_target_constraints_by_speaker(
+                eligible_anon_names=eligible_anon_names,
+                recent_messages=recent_messages,
+            ),
             action_counts=self._action_counts,
             exclude_performer=self._anon_user,
             agent_traits=anon_traits,
             template=self.director_action_prompt_template,
         )
+
+        valid_direct_targets_by_speaker: Dict[str, Set[str]] = {}
+        for speaker_anon in eligible_anon_names:
+            if speaker_anon == self._anon_user:
+                continue
+            speaker_real = self._deanon_name(speaker_anon)
+            valid_targets = {
+                target_anon
+                for target_anon in eligible_anon_names
+                if target_anon not in {speaker_anon, self._anon_user}
+                and not self._agents_share_alignment_cell(speaker_real, self._deanon_name(target_anon))
+            }
+            valid_direct_targets_by_speaker[speaker_anon] = valid_targets
 
         # Retry loop: Director Action is the most critical call in the pipeline.
         # On empty response or unparseable JSON, retry with short exponential backoff
@@ -1998,6 +2204,32 @@ class Orchestrator:
                     "which is not one of the visible performer labels in AGENT_PROFILES",
                 )
                 continue
+
+            if (
+                selected_target_user
+                and selected_performer != self._anon_user
+                and selected_target_user not in valid_direct_targets_by_speaker.get(selected_performer, set())
+            ):
+                self.logger.log_error(
+                    "director_action_invalid_target_for_speaker",
+                    f"attempt {attempt + 1}/{MAX_ACTION_ATTEMPTS}: Director returned target_user '{selected_target_user}' "
+                    f"for '{selected_performer}', but that target is not valid for the chosen speaker",
+                )
+                continue
+
+            if action_data.get("action_type") == "reply" and action_data.get("target_message_id"):
+                speaker_real = self._deanon_name(selected_performer)
+                reply_target = next(
+                    (message for message in self.state.messages if message.message_id == action_data["target_message_id"]),
+                    None,
+                )
+                if reply_target is not None and not self._can_directly_target_message(speaker_real, reply_target):
+                    self.logger.log_error(
+                        "director_action_invalid_reply_target",
+                        f"attempt {attempt + 1}/{MAX_ACTION_ATTEMPTS}: Director returned reply target "
+                        f"'{action_data['target_message_id']}' for '{selected_performer}', but that message is not a valid direct target",
+                    )
+                    continue
 
             return action_data
 

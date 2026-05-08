@@ -102,6 +102,32 @@ def format_agent_profiles(
     return "\n\n".join(lines)
 
 
+def format_target_constraints_by_speaker(
+    constraints_by_speaker: Dict[str, Dict[str, object]],
+) -> str:
+    """Format per-speaker target constraints for the Director Action prompt."""
+    if not constraints_by_speaker:
+        return "(No speaker-specific target constraints available.)"
+
+    lines = ["Target constraints by speaker:"]
+    for speaker in sorted(constraints_by_speaker.keys()):
+        data = constraints_by_speaker.get(speaker) or {}
+        valid_targets = data.get("valid_targets") or []
+        forbidden_targets = data.get("forbidden_targets") or []
+        best_anchor = data.get("best_reply_anchor")
+
+        valid_text = ", ".join(valid_targets) if valid_targets else "(none)"
+        forbidden_text = ", ".join(forbidden_targets) if forbidden_targets else "(none)"
+        anchor_text = str(best_anchor or "(no clear reply anchor)")
+
+        lines.append(
+            f"- {speaker}: valid direct agent targets={valid_text}; "
+            f"forbidden same-cell targets={forbidden_text}; "
+            f"best recent anchor={anchor_text}"
+        )
+    return "\n".join(lines)
+
+
 def format_participant_hint(participant_stance_hint: Optional[str]) -> str:
     """Format the participant's pre-session self-report for the Director."""
     if not participant_stance_hint:
@@ -433,6 +459,7 @@ def build_action_user_prompt(
     performer_counts: Optional[Dict[str, int]] = None,
     action_counts: Optional[Dict[str, int]] = None,
     participation_summary: str = "",
+    target_constraints_by_speaker: str = "",
     exclude_performer: Optional[str] = None,
     agent_traits: Optional[Dict[str, Dict[str, str]]] = None,
     template: Optional[str] = None,
@@ -461,6 +488,7 @@ def build_action_user_prompt(
     prompt = prompt.replace("{PARTICIPATION_SUMMARY}", participation_summary)
     prompt = prompt.replace("{ACTION_SUMMARY}", action_summary)
     prompt = prompt.replace("{CHAT_LOG}", chat_log)
+    prompt = prompt.replace("{TARGET_CONSTRAINTS_BY_SPEAKER}", target_constraints_by_speaker)
 
     return prompt
 

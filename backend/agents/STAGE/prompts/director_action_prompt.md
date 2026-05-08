@@ -97,6 +97,8 @@ Read the recent chat log and current action distribution below. What action type
 {CHAT_LOG}
 
 **Action distribution so far:** {ACTION_SUMMARY}
+
+{TARGET_CONSTRAINTS_BY_SPEAKER}
 {/USER}
 
 Select exactly one action type:
@@ -110,6 +112,7 @@ Select exactly one action type:
 Rules:
 - Prefer reacting to a recent person or message rather than speaking to the room in general.
 - A non-targeted room-wide `message` should be rare, maximum 3 times in a session.
+- If a performer is posting for the first time and reacting to the latest speaker, a plain `message` is fully valid and often more natural than a `reply`.
 - If there is a natural recent target, use `message`, `reply`, or `@mention` instead of a room-wide opener.
 - If using `message` for an underrepresented side, name who or what the performer is pushing against, and who they must not validate or echo. Avoid vague instructions like "reinforce your side" with no named target.
 
@@ -124,6 +127,10 @@ Rules:
 **Reply/mention when not addressing the latest message:** If the performer is responding to someone whose message is NOT the most recent in the chat log, always use `reply` (with `target_message_id`) or `@mention` (with `target_user`) - never a plain `message`. This prevents confusing out-of-context responses.
 
 **If the latest message already gives you a natural anchor, use it:** When the room has a clear active thread, treat a new room-wide opener as the wrong choice. Prefer a targeted response to the most recent relevant speaker or message unless there is no plausible anchor at all.
+
+**Speaker-specific target constraints:** Once you choose a performer, obey the target constraints listed for that speaker. If a speaker has a listed best recent anchor, use it as the default conversation anchor, but choose between `message`, `reply`, and `@mention` based on what feels most natural for that speaker's turn.
+
+**Do not over-convert first entries into replies:** When a new speaker is entering an already active thread, they do not need a quote-reply just because an anchor exists. If they are reacting to the latest speaker, a plain `message` can be the better choice.
 
 **Variety:** Avoid two consecutive actions from the same agent unless a direct follow-up from that same agent is clearly necessary.
 

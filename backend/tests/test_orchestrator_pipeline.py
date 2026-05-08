@@ -18,6 +18,8 @@ from agents.STAGE.orchestrator import (
     Orchestrator,
     TurnResult,
     MAX_PERFORMER_RETRIES,
+    TARGET_ELIGIBLE_SPEAKER_COUNT,
+    anonymize_message,
 )
 
 
@@ -230,7 +232,13 @@ class TestOrchestratorInit:
         state = _make_state()
         state.add_message(Message.create(sender="Alice", content="m1"))
         state.add_message(Message.create(sender="Bob", content="m2"))
-        orch, logger = _make_orchestrator(state=state)
+        orch, logger = _make_orchestrator(
+            state=state,
+            agent_traits={
+                "Alice": {"alignment_cell": "pro_policy_pro_topic"},
+                "Bob": {"alignment_cell": "anti_policy_anti_topic"},
+            },
+        )
         anon_alice = orch._name_map["Alice"]
         anon_bob = orch._name_map["Bob"]
         orch.director_llm.generate_response = AsyncMock(
@@ -255,11 +263,14 @@ class TestOrchestratorInit:
         eligible_section = action_prompt.split("Eligible speakers this turn:", 1)[1]
         assert f"- {anon_alice}: spoken=yes, messages=1, last_spoke=1 agent message ago" in eligible_section
         assert f"- {anon_bob}:" not in eligible_section
+        assert "Target constraints by speaker:" in action_prompt
+        assert f"- {anon_alice}: valid direct agent targets=(none);" in action_prompt
+        assert f"best recent anchor={anon_bob} [{state.messages[-1].message_id}]" in action_prompt
 
     def test_candidate_filter_prioritizes_like_minded_when_like_target_is_behind(self):
         state = _make_state(
             participant_stance_hint="qualified_against",
-            agents=[Agent(name="Alice"), Agent(name="Bob"), Agent(name="Carol")],
+            agents=[Agent(name="Alice"), Agent(name="Bob"), Agent(name="Carol"), Agent(name="Dora"), Agent(name="Eve")],
         )
         state.add_message(Message.create(sender="Bob", content="x", is_incivil=True))
         state.add_message(Message.create(sender="Carol", content="y", is_incivil=False))
@@ -269,18 +280,22 @@ class TestOrchestratorInit:
                 "Alice": {"alignment_cell": "anti_policy_pro_topic", "incivility": "civil"},
                 "Bob": {"alignment_cell": "pro_policy_pro_topic", "incivility": "uncivil"},
                 "Carol": {"alignment_cell": "anti_policy_anti_topic", "incivility": "civil"},
+                "Dora": {"alignment_cell": "anti_policy_pro_topic", "incivility": "uncivil"},
+                "Eve": {"alignment_cell": "pro_policy_pro_topic", "incivility": "civil"},
             },
         )
         filtered = orch._filter_candidate_agents_for_targets(
             "LIKEMINDED_TARGET = 80\nNOT_LIKEMINDED_TARGET = 20\nINCIVILITY_TARGET = 50",
-            {"Alice", "Bob", "Carol"},
+            {"Alice", "Bob", "Carol", "Dora", "Eve"},
         )
-        assert filtered == {"Alice"}
+        assert len(filtered) == TARGET_ELIGIBLE_SPEAKER_COUNT
+        assert "Alice" in filtered
+        assert "Dora" in filtered
 
     def test_candidate_filter_intersects_alignment_and_uncivility_targets(self):
         state = _make_state(
             participant_stance_hint="qualified_against",
-            agents=[Agent(name="Alice"), Agent(name="Bob"), Agent(name="Carol"), Agent(name="Dora")],
+            agents=[Agent(name="Alice"), Agent(name="Bob"), Agent(name="Carol"), Agent(name="Dora"), Agent(name="Eve")],
         )
         state.add_message(Message.create(sender="Bob", content="x", is_incivil=False))
         state.add_message(Message.create(sender="Carol", content="y", is_incivil=False))
@@ -291,13 +306,30 @@ class TestOrchestratorInit:
                 "Bob": {"alignment_cell": "pro_policy_pro_topic", "incivility": "civil"},
                 "Carol": {"alignment_cell": "anti_policy_anti_topic", "incivility": "civil"},
                 "Dora": {"alignment_cell": "anti_policy_pro_topic", "incivility": "civil"},
+                "Eve": {"alignment_cell": "pro_policy_pro_topic", "incivility": "uncivil"},
             },
         )
         filtered = orch._filter_candidate_agents_for_targets(
             "LIKEMINDED_TARGET = 80\nNOT_LIKEMINDED_TARGET = 20\nINCIVILITY_TARGET = 80",
-            {"Alice", "Bob", "Carol", "Dora"},
+            {"Alice", "Bob", "Carol", "Dora", "Eve"},
         )
-        assert filtered == {"Alice"}
+        assert len(filtered) == TARGET_ELIGIBLE_SPEAKER_COUNT
+        assert "Alice" in filtered
+        assert "Dora" in filtered
+
+    def test_sanitize_summary_for_eligible_agents_rewrites_noneligible_names(self):
+        state = _make_state(agents=[Agent(name="Alice"), Agent(name="Bob"), Agent(name="Carol")])
+        orch, _ = _make_orchestrator(state=state)
+        anon_alice = orch._name_map["Alice"]
+        anon_bob = orch._name_map["Bob"]
+        anon_carol = orch._name_map["Carol"]
+        sanitized = orch._sanitize_summary_for_eligible_agents(
+            f"Alignment is close; introduce {anon_bob} and {anon_carol} soon to rebalance.",
+            {anon_alice, orch._anon_user},
+        )
+        assert anon_bob not in sanitized
+        assert anon_carol not in sanitized
+        assert "eligible agent" in sanitized
 
     def test_same_cell_guard_does_not_trigger_for_same_ideology_different_cells(self):
         state = _make_state(
@@ -816,6 +848,43 @@ class TestSameSideGuard:
         )
 
     @pytest.mark.asyncio
+    async def test_same_side_target_redirects_to_valid_reply_when_available(self):
+        state = _make_state(agents=[Agent(name="Alice"), Agent(name="Bob"), Agent(name="Carol")])
+        state.add_message(Message.create(sender="Bob", content="Aliado same-cell"))
+        state.add_message(Message.create(sender="participant", content="Yo lo apoyo"))
+        participant_msg = state.messages[-1]
+
+        orch, logger = _make_orchestrator(
+            state=state,
+            agent_traits={
+                "Alice": {"alignment_cell": "pro_policy_pro_topic"},
+                "Bob": {"alignment_cell": "pro_policy_pro_topic"},
+                "Carol": {"alignment_cell": "anti_policy_anti_topic"},
+            },
+        )
+        anon_alice = orch._name_map["Alice"]
+
+        action_resp = _action_json(
+            next_performer=anon_alice,
+            action_type="reply",
+            target_message_id=state.messages[0].message_id,
+        )
+        orch.director_llm.generate_response = AsyncMock(return_value=action_resp)
+        orch.performer_llm.generate_response = AsyncMock(return_value="Yo tambien lo apoyo.")
+        orch.moderator_llm.generate_response = AsyncMock(return_value="Yo tambien lo apoyo.")
+
+        result = await orch.execute_turn("criteria_A")
+
+        assert result is not None
+        assert result.action_type == "reply"
+        assert result.target_message_id == participant_msg.message_id
+        assert result.message.reply_to == participant_msg.message_id
+        logger.log_error.assert_any_call(
+            "director_same_side_target",
+            "Director targeted same-cell agents 'Alice' -> 'Bob'; redirecting to reply to 'participant'",
+        )
+
+    @pytest.mark.asyncio
     async def test_mention_to_same_side_agent_becomes_room_message(self):
         state = _make_state()
         orch, logger = _make_orchestrator(
@@ -955,7 +1024,7 @@ class TestRoomWideOpeners:
         assert result.message.reply_to is None
 
     @pytest.mark.asyncio
-    async def test_consecutive_room_wide_opener_is_redirected_to_reply(self):
+    async def test_message_to_latest_valid_speaker_is_allowed_without_redirect(self):
         state = _make_state()
         first_opener = Message.create(sender="Bob", content="Esto es un desastre")
         participant_msg = Message.create(sender="participant", content="Yo no lo veo igual")
@@ -973,26 +1042,29 @@ class TestRoomWideOpeners:
         result = await orch.execute_turn("criteria_A")
 
         assert result is not None
-        assert result.action_type == "reply"
-        assert result.message.reply_to == participant_msg.message_id
-        logger.log_error.assert_any_call(
-            "director_room_wide_opener_redirected",
-            "Redirected room-wide opener for 'Alice' to reply to 'participant'",
+        assert result.action_type == "message"
+        assert result.message.reply_to is None
+        assert not any(
+            call.args[0] == "director_room_wide_opener_redirected"
+            for call in logger.log_error.call_args_list
         )
 
     @pytest.mark.asyncio
-    async def test_third_room_wide_opener_in_session_is_redirected(self):
+    async def test_true_room_wide_opener_still_redirects_when_no_latest_valid_anchor(self):
         state = _make_state()
-        first_opener = Message.create(sender="Alice", content="Esto no tiene sentido")
-        second_reply = Message.create(sender="participant", content="Explica eso")
-        third_opener = Message.create(sender="Bob", content="Es un disparate total")
-        state.add_message(first_opener)
-        state.add_message(second_reply)
-        state.add_message(third_opener)
+        participant_msg = Message.create(sender="participant", content="Explica eso")
+        ally_msg = Message.create(sender="Bob", content="Estoy de acuerdo contigo")
+        state.add_message(participant_msg)
+        state.add_message(ally_msg)
 
-        orch, logger = _make_orchestrator(state=state)
+        orch, logger = _make_orchestrator(
+            state=state,
+            agent_traits={
+                "Alice": {"alignment_cell": "pro_policy_pro_topic"},
+                "Bob": {"alignment_cell": "pro_policy_pro_topic"},
+            },
+        )
         anon_alice = orch._name_map["Alice"]
-        # Force Alice again here so it also covers "not first turn" opener redirection.
         orch.director_llm.generate_response = AsyncMock(
             return_value=_action_json(next_performer=anon_alice, action_type="message")
         )
@@ -1003,10 +1075,10 @@ class TestRoomWideOpeners:
 
         assert result is not None
         assert result.action_type == "reply"
-        assert result.message.reply_to == third_opener.message_id
+        assert result.message.reply_to == participant_msg.message_id
         logger.log_error.assert_any_call(
             "director_room_wide_opener_redirected",
-            "Redirected room-wide opener for 'Alice' to reply to 'Bob'",
+            "Redirected room-wide opener for 'Alice' to reply to 'participant'",
         )
 
 
@@ -1359,6 +1431,50 @@ class TestExecuteTurnErrors:
         logger.log_error.assert_any_call(
             "director_action_unknown_target_label",
             "attempt 1/3: Director returned target_user 'Performer 99', which is not one of the visible performer labels in AGENT_PROFILES",
+        )
+
+    @pytest.mark.asyncio
+    async def test_director_action_retries_when_reply_target_is_invalid_for_speaker(self):
+        state = _make_state(agents=[Agent(name="Alice"), Agent(name="Bob"), Agent(name="Carol")])
+        same_cell_msg = Message.create(sender="Bob", content="Aliado")
+        valid_target_msg = Message.create(sender="Carol", content="Oponente")
+        state.add_message(same_cell_msg)
+        state.add_message(valid_target_msg)
+        orch, logger = _make_orchestrator(
+            state=state,
+            agent_traits={
+                "Alice": {"alignment_cell": "pro_policy_pro_topic"},
+                "Bob": {"alignment_cell": "pro_policy_pro_topic"},
+                "Carol": {"alignment_cell": "anti_policy_anti_topic"},
+            },
+        )
+        anon_alice = orch._name_map["Alice"]
+
+        orch.director_llm.generate_response = AsyncMock(
+            side_effect=[
+                _action_json(
+                    next_performer=anon_alice,
+                    action_type="reply",
+                    target_message_id=same_cell_msg.message_id,
+                ),
+                _action_json(
+                    next_performer=anon_alice,
+                    action_type="reply",
+                    target_message_id=valid_target_msg.message_id,
+                ),
+            ]
+        )
+
+        result = await orch._director_action(
+            anon_recent=[anonymize_message(m, orch._name_map) for m in state.messages],
+            real_recent=state.messages,
+        )
+
+        assert result is not None
+        assert result["target_message_id"] == valid_target_msg.message_id
+        logger.log_error.assert_any_call(
+            "director_action_invalid_reply_target",
+            f"attempt 1/3: Director returned reply target '{same_cell_msg.message_id}' for '{anon_alice}', but that message is not a valid direct target",
         )
 
     @pytest.mark.asyncio

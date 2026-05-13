@@ -81,7 +81,9 @@ Then apply this rule:
 - They do **not** change from turn to turn.
 - Use the labels exactly as shown in `AGENT_PROFILES`.
 - `next_performer` must exactly match one visible performer label from `AGENT_PROFILES`.
-- If you use `target_user`, it must also exactly match a visible performer label from `AGENT_PROFILES`.
+- If you use `target_user`, it must exactly match a real session-member label already visible somewhere in this turn's prompt: either a speaker shown in `AGENT_PROFILES`, the human participant's name, a name present in the recent chat log, or a name listed in the speaker-specific target constraints.
+- `target_user` does **not** need to be one of the currently eligible speakers.
+- In the speaker-specific target constraints, `participant target=support-only` means the performer may address the participant directly but must not attack, blame, mock, or undermine them.
 
 {#USER}
 {AGENT_PROFILES}
@@ -112,6 +114,7 @@ Select exactly one action type:
 Rules:
 - Prefer reacting to a recent person or message rather than speaking to the room in general.
 - A non-targeted room-wide `message` should be rare, maximum 3 times in a session.
+- Avoid consecutive true room-wide openers when there is any plausible recent anchor.
 - If a performer is posting for the first time and reacting to the latest speaker, a plain `message` is fully valid and often more natural than a `reply`.
 - If there is a natural recent target, use `message`, `reply`, or `@mention` instead of a room-wide opener.
 - If using `message` for an underrepresented side, name who or what the performer is pushing against, and who they must not validate or echo. Avoid vague instructions like "reinforce your side" with no named target.

@@ -264,8 +264,44 @@ class TestOrchestratorInit:
         assert f"- {anon_alice}: spoken=yes, messages=1, last_spoke=1 agent message ago" in eligible_section
         assert f"- {anon_bob}:" not in eligible_section
         assert "Target constraints by speaker:" in action_prompt
-        assert f"- {anon_alice}: valid direct agent targets=(none);" in action_prompt
+        assert f"- {anon_alice}: valid direct agent targets={anon_bob};" in action_prompt
+        assert "participant target=allowed;" in action_prompt
         assert f"best recent anchor={anon_bob} [{state.messages[-1].message_id}]" in action_prompt
+
+    @pytest.mark.asyncio
+    async def test_director_action_allows_noneligible_but_valid_target_user(self):
+        state = _make_state()
+        state.add_message(Message.create(sender="Bob", content="m1"))
+        orch, logger = _make_orchestrator(
+            state=state,
+            agent_traits={
+                "Alice": {"alignment_cell": "pro_policy_pro_topic"},
+                "Bob": {"alignment_cell": "anti_policy_anti_topic"},
+            },
+        )
+        anon_alice = orch._name_map["Alice"]
+        anon_bob = orch._name_map["Bob"]
+        orch.director_llm.generate_response = AsyncMock(
+            return_value=_action_json(
+                next_performer=anon_alice,
+                action_type="@mention",
+                target_user=anon_bob,
+            )
+        )
+
+        action = await orch._director_action(
+            anon_recent=[],
+            override_profiles={anon_alice: "", orch._anon_user: ""},
+            override_perf_counts={anon_alice: 0, orch._anon_user: 0},
+        )
+
+        assert action is not None
+        assert action["next_performer"] == anon_alice
+        assert action["target_user"] == anon_bob
+        assert not any(
+            call.args and call.args[0] == "director_action_unknown_target_label"
+            for call in logger.log_error.call_args_list
+        )
 
     def test_candidate_filter_prioritizes_like_minded_when_like_target_is_behind(self):
         state = _make_state(
@@ -1430,7 +1466,7 @@ class TestExecuteTurnErrors:
         assert result["target_user"] == anon_bob
         logger.log_error.assert_any_call(
             "director_action_unknown_target_label",
-            "attempt 1/3: Director returned target_user 'Performer 99', which is not one of the visible performer labels in AGENT_PROFILES",
+            "attempt 1/3: Director returned target_user 'Performer 99', which is not one of the visible session-member labels for this turn",
         )
 
     @pytest.mark.asyncio

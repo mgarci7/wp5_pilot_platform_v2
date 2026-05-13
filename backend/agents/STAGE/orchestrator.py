@@ -42,7 +42,7 @@ from agents.STAGE.classifier import (
 
 MAX_PERFORMER_RETRIES = 3
 MAX_STANCE_RETRIES = 1
-MAX_ROOM_WIDE_OPENERS = 2
+MAX_ROOM_WIDE_OPENERS = 3
 TARGET_ELIGIBLE_SPEAKER_COUNT = 4
 
 
@@ -174,7 +174,8 @@ class Orchestrator:
     """Coordinates the three-call Director + Performer + Moderator pipeline.
 
     Maintains agent profiles that accumulate over the session via the
-    Director's Update call. All names are anonymized before LLM calls.
+    Director's Update call. Performer labels stay fixed for the full
+    session and use the agents' real names.
     """
 
     def __init__(
@@ -974,11 +975,16 @@ class Orchestrator:
             return "(No speaker-specific target constraints available.)"
 
         constraints: Dict[str, Dict[str, object]] = {}
+        all_agent_targets = sorted(
+            anon_name
+            for anon_name in self._performer_counts.keys()
+            if anon_name != self._anon_user
+        )
         for speaker_anon in visible_speakers:
             speaker_real = self._deanon_name(speaker_anon)
             valid_targets: List[str] = []
             forbidden_targets: List[str] = []
-            for target_anon in visible_speakers:
+            for target_anon in all_agent_targets:
                 if target_anon == speaker_anon:
                     continue
                 target_real = self._deanon_name(target_anon)
@@ -991,11 +997,17 @@ class Orchestrator:
             best_anchor_text = None
             if best_anchor is not None:
                 best_anchor_text = f"{best_anchor.sender} [{best_anchor.message_id}]"
+            participant_target_mode = (
+                "support-only"
+                if self._expected_like_minded_for_agent(speaker_real) is True
+                else "allowed"
+            )
 
             constraints[speaker_anon] = {
                 "valid_targets": valid_targets,
                 "forbidden_targets": forbidden_targets,
                 "best_reply_anchor": best_anchor_text,
+                "participant_target_mode": participant_target_mode,
             }
 
         return format_target_constraints_by_speaker(constraints)
@@ -2088,6 +2100,7 @@ class Orchestrator:
         profiles = override_profiles if override_profiles is not None else self.agent_profiles
         perf_counts = override_perf_counts if override_perf_counts is not None else self._performer_counts
         eligible_anon_names = set(profiles.keys())
+        visible_target_labels = set(self.agent_profiles.keys())
         recent_messages = real_recent if real_recent is not None else self.state.get_recent_messages(len(anon_recent))
         sanitized_internal_summary = self._sanitize_summary_for_eligible_agents(
             self._internal_validity_summary or "No actions have occurred yet. No assessment available.",
@@ -2132,14 +2145,19 @@ class Orchestrator:
         )
 
         valid_direct_targets_by_speaker: Dict[str, Set[str]] = {}
+        all_agent_target_labels = {
+            anon_name
+            for anon_name in self._performer_counts.keys()
+            if anon_name != self._anon_user
+        }
         for speaker_anon in eligible_anon_names:
             if speaker_anon == self._anon_user:
                 continue
             speaker_real = self._deanon_name(speaker_anon)
             valid_targets = {
                 target_anon
-                for target_anon in eligible_anon_names
-                if target_anon not in {speaker_anon, self._anon_user}
+                for target_anon in all_agent_target_labels
+                if target_anon != speaker_anon
                 and not self._agents_share_alignment_cell(speaker_real, self._deanon_name(target_anon))
             }
             valid_direct_targets_by_speaker[speaker_anon] = valid_targets
@@ -2197,17 +2215,18 @@ class Orchestrator:
                 continue
 
             selected_target_user = action_data.get("target_user")
-            if selected_target_user and selected_target_user not in profiles:
+            if selected_target_user and selected_target_user not in visible_target_labels:
                 self.logger.log_error(
                     "director_action_unknown_target_label",
                     f"attempt {attempt + 1}/{MAX_ACTION_ATTEMPTS}: Director returned target_user '{selected_target_user}', "
-                    "which is not one of the visible performer labels in AGENT_PROFILES",
+                    "which is not one of the visible session-member labels for this turn",
                 )
                 continue
 
             if (
                 selected_target_user
                 and selected_performer != self._anon_user
+                and selected_target_user != self._anon_user
                 and selected_target_user not in valid_direct_targets_by_speaker.get(selected_performer, set())
             ):
                 self.logger.log_error(

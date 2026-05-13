@@ -115,6 +115,7 @@ def format_target_constraints_by_speaker(
         valid_targets = data.get("valid_targets") or []
         forbidden_targets = data.get("forbidden_targets") or []
         best_anchor = data.get("best_reply_anchor")
+        participant_target_mode = str(data.get("participant_target_mode") or "allowed")
 
         valid_text = ", ".join(valid_targets) if valid_targets else "(none)"
         forbidden_text = ", ".join(forbidden_targets) if forbidden_targets else "(none)"
@@ -123,6 +124,7 @@ def format_target_constraints_by_speaker(
         lines.append(
             f"- {speaker}: valid direct agent targets={valid_text}; "
             f"forbidden same-cell targets={forbidden_text}; "
+            f"participant target={participant_target_mode}; "
             f"best recent anchor={anchor_text}"
         )
     return "\n".join(lines)

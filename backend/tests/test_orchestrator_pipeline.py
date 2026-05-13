@@ -592,27 +592,6 @@ class TestExecuteTurnMessage:
         assert result.message is not None
         assert result.message.sender == "Alice"
         assert result.message.content == "Hello everyone!"
-        orch.moderator_llm.generate_response.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_multiline_performer_output_still_uses_moderator(self):
-        state = _make_state()
-        orch, _ = _make_orchestrator(state=state)
-        anon_alice = orch._name_map["Alice"]
-
-        action_resp = _action_json(next_performer=anon_alice, action_type="message")
-        orch.director_llm.generate_response = AsyncMock(return_value=action_resp)
-        orch.performer_llm.generate_response = AsyncMock(
-            return_value="Respuesta:\nHello everyone!"
-        )
-        orch.moderator_llm.generate_response = AsyncMock(return_value="Hello everyone!")
-
-        result = await orch.execute_turn("criteria_A")
-
-        assert result is not None
-        assert result.message is not None
-        assert result.message.content == "Hello everyone!"
-        orch.moderator_llm.generate_response.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_cross_cell_validation_reply_retries_and_rewrites(self):

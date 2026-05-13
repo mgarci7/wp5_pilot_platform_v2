@@ -219,9 +219,6 @@ class Orchestrator:
         self._agent_traits = agent_traits or {}
         self.participant_stance_hint = getattr(state, "participant_stance_hint", None)
         self._participant_hint_text = format_participant_hint(self.participant_stance_hint)
-        self._participant_alignment_cell_text = format_participant_alignment_cell(
-            self._participant_alignment_cell_live()
-        )
         self.classifier_prompt_template = (
             classifier_prompt_template
             if isinstance(classifier_prompt_template, str) and classifier_prompt_template.strip()
@@ -298,6 +295,11 @@ class Orchestrator:
         # Carry forward validity evaluations between turns.
         self._internal_validity_summary: str = ""
         self._ecological_validity_summary: str = ""
+
+        # Participant alignment cell — computed after name_map and agent_traits are ready.
+        self._participant_alignment_cell_text = format_participant_alignment_cell(
+            self._participant_alignment_cell_live()
+        )
 
         # Evaluate fires every evaluate_interval turns, so each call sees a
         # full window of new messages.  Counter tracks turns since last evaluate.
@@ -1470,7 +1472,7 @@ class Orchestrator:
             same_side_target = None
             if target_user and self._agents_share_alignment_cell(agent_name, target_user):
                 same_side_target = target_user
-            elif target_message_id and target_message_id:
+            elif target_message_id:
                 target_msg_for_guard = next(
                     (m for m in self.state.messages if m.message_id == target_message_id),
                     None,
@@ -1519,7 +1521,7 @@ class Orchestrator:
             else:
                 if target_user and self._agents_have_different_alignment_cells(agent_name, target_user):
                     cross_cell_target = target_user
-                elif target_message_id and target_message_id:
+                elif target_message_id:
                     target_msg_for_guard = next(
                         (m for m in self.state.messages if m.message_id == target_message_id),
                         None,

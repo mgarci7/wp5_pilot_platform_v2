@@ -639,6 +639,61 @@ class TestExecuteTurnMessage:
             context={"action_type": "reply"},
         )
 
+    @pytest.mark.asyncio
+    async def test_like_minded_reply_to_participant_retries_if_it_turns_against_them(self):
+        state = _make_state(
+            participant_stance_hint="qualified_against",
+            agents=[Agent(name="Alice"), Agent(name="Bob")],
+        )
+        participant_msg = Message.create(
+            sender="participant",
+            content="Esto beneficia a empresarios y deja tirados a los migrantes",
+        )
+        state.add_message(participant_msg)
+        orch, logger = _make_orchestrator(
+            state=state,
+            agent_traits={
+                "Alice": {"alignment_cell": "anti_policy_pro_topic"},
+                "Bob": {"alignment_cell": "anti_policy_anti_topic"},
+            },
+        )
+        anon_alice = orch._name_map["Alice"]
+
+        orch.director_llm.generate_response = AsyncMock(
+            return_value=_action_json(
+                next_performer=anon_alice,
+                action_type="reply",
+                target_message_id=participant_msg.message_id,
+            )
+        )
+        orch.performer_llm.generate_response = AsyncMock(
+            side_effect=[
+                "Martin, deja de decir estupideces, no todo es racismo.",
+                "Lo de fondo que dices es verdad: esto deja demasiada mano al empresario y no protege bien a la gente migrante.",
+            ]
+        )
+        orch.moderator_llm.generate_response = AsyncMock(
+            side_effect=[
+                "Martin, deja de decir estupideces, no todo es racismo.",
+                "Lo de fondo que dices es verdad: esto deja demasiada mano al empresario y no protege bien a la gente migrante.",
+            ]
+        )
+
+        result = await orch.execute_turn("criteria_A")
+
+        assert result is not None
+        assert result.message is not None
+        assert result.message.reply_to == participant_msg.message_id
+        assert result.message.content == (
+            "Lo de fondo que dices es verdad: esto deja demasiada mano al empresario y no protege bien a la gente migrante."
+        )
+        assert orch.performer_llm.generate_response.call_count == 2
+        logger.log_error.assert_any_call(
+            "performer_like_minded_participant_attack_retry",
+            "Generated message for 'Alice' attacked same-cell participant 'participant'; retrying",
+            context={"action_type": "reply"},
+        )
+
 
 # â”€â”€ execute_turn: like action â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -668,6 +723,32 @@ class TestExecuteTurnLike:
         assert result.target_message_id == msg_id
         assert result.message is None
         orch.performer_llm.generate_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_like_does_not_validate_cross_cell_agent(self):
+        state = _make_state(
+            participant_stance_hint="qualified_against",
+            agents=[Agent(name="Alice"), Agent(name="Bob"), Agent(name="Carol")],
+        )
+        cross_cell_msg = Message.create(sender="Carol", content="Coincido plenamente")
+        same_cell_msg = Message.create(sender="Bob", content="No arregla el problema de fondo")
+        state.add_message(cross_cell_msg)
+        state.add_message(same_cell_msg)
+        orch, _ = _make_orchestrator(
+            state=state,
+            agent_traits={
+                "Alice": {"alignment_cell": "anti_policy_pro_topic"},
+                "Bob": {"alignment_cell": "anti_policy_pro_topic"},
+                "Carol": {"alignment_cell": "anti_policy_anti_topic"},
+            },
+        )
+        orch.auto_like_probability = 1.0
+
+        result = orch._try_auto_like({"Alice"}, random.Random(0))
+
+        assert result is not None
+        assert result.action_type == "like"
+        assert result.target_message_id == same_cell_msg.message_id
 
 
 # â”€â”€ execute_turn: reply action â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1159,6 +1240,12 @@ class TestFixedStanceGuard:
         assert "Not-like-minded messages so far: 1/2 (50%)" in summary
         assert "Incivil messages so far: 1/2 (50%)" in summary
         assert "Civil messages so far: 1/2 (50%)" in summary
+
+    def test_detects_direct_attack_language_on_participant(self):
+        assert Orchestrator._looks_like_attack_on_participant("Martin, deja de decir estupideces.") is True
+        assert Orchestrator._looks_like_attack_on_participant(
+            "Lo de fondo que dices es verdad y habría que ir más lejos."
+        ) is False
 
     @pytest.mark.asyncio
     async def legacy_mismatched_fixed_stance_retries_once_and_keeps_second_draft(self):

@@ -125,7 +125,8 @@ def format_target_constraints_by_speaker(
             f"- {speaker}: valid direct agent targets={valid_text}; "
             f"forbidden same-cell targets={forbidden_text}; "
             f"participant target={participant_target_mode}; "
-            f"best recent anchor={anchor_text}"
+            f"best recent anchor={anchor_text}; "
+            "if engaging a different-cell agent, attack the same issue from your own cell's frame rather than agreeing with them"
         )
     return "\n".join(lines)
 

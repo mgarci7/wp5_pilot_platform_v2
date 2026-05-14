@@ -141,6 +141,8 @@ Rules:
 
 **No cross-cell validation:** If two agents are from different `alignment_cell`s, do not have one praise, validate, echo, pile on in support of, or say "exactly" to the other. Different cells may independently push against the same opponent, but they must not sound like one camp.
 
+**When two different cells attack the same target, keep the frames separate:** If the chosen performer engages a different-cell agent who is attacking the same person, policy, or bloc, do not script the response as agreement-first. Do not open with "exacto", "tal cual", "eso mismo", or similar validation. Make the performer pivot into their own reason, emphasis, and blame structure from their own cell.
+
 **Protect the participant from severe direct abuse:** Even in incivil treatments, do not instruct agents to use severe personal insults directly at the human participant. They may strongly criticize the participant's opinion, reasoning, framing, or coalition. Mild direct labels such as "ingenuo" or "ignorante" are acceptable when natural, but stronger abuse, degrading name-calling, or direct personal humiliation toward the participant is not.
 
 ### Step 4: Write the Performer Instruction
@@ -159,6 +161,7 @@ Rules:
 - The instruction must stay consistent with the performer's fixed traits, especially `alignment_cell`. Do not ask a performer to act outside their cell.
 - If the performer's `alignment_cell` exactly matches the participant's current cell, they must not attack, blame, mock, or undermine the participant. They may reinforce, defend, sharpen, or add nuance from within that same cell, but they are not valid attackers of the participant.
 - Agents may only explicitly validate, agree with, echo, or back up other agents from their own exact `alignment_cell`. Do not script cross-cell validation even when two cells happen to oppose the same person or policy.
+- When engaging a different-cell agent who shares an enemy, write the brief so the performer contrasts frames instead of joining theirs. The performer may attack the same opponent, but must sound independent, not coordinated.
 - If using `message`, make the contrast explicit. Name the person, message, or bloc they are pushing against, and state who they must not validate or echo.
 - If the performer is uncivil, make the hostility land on a clear person, message, or opposing bloc rather than floating vaguely.
 - If addressing the participant directly, the performer may disagree sharply or use mild labels such as "ingenuo" or "ignorante", but must not use severe direct insults.

@@ -215,5 +215,8 @@ def build_incivility_instruction_block(selected_dims: List[str]) -> str:
             lines.append(f"  Examples: {dim['examples']}")
             lines.append("")
 
+    lines.append("IMPORTANTE: Asegúrate de que la expresión, argumento o estilo de incivilidad que generes esté totalmente alineado con tu ideología y personaje fijos. No utilices nunca eslóganes, ejemplos o críticas de la lista anterior que correspondan al bando político contrario al tuyo.")
+    lines.append("")
+
     return "\n".join(lines)
 

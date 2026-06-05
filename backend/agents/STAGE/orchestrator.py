@@ -769,6 +769,7 @@ class Orchestrator:
                 preferred_like_value = True if like_gap >= not_like_gap else False
 
         classified_incivility = [message for message in agent_messages if message.is_incivil is not None]
+        preferred_uncivil_ideology: Optional[str] = None
         if classified_incivility and incivil_target is not None:
             incivil_count = sum(1 for message in classified_incivility if message.is_incivil)
             civil_count = sum(1 for message in classified_incivility if message.is_incivil is False)
@@ -780,6 +781,25 @@ class Orchestrator:
 
             if incivil_gap > 0 or civil_gap > 0:
                 preferred_civility = "uncivil" if incivil_gap >= civil_gap else "civil"
+
+        if preferred_civility == "uncivil":
+            uncivil_left_count = 0
+            uncivil_right_count = 0
+            for message in classified_incivility:
+                if message.is_incivil is True:
+                    traits = self._agent_traits.get(message.sender) or {}
+                    sender_ideology = self._normalize_agent_ideology(traits.get("ideology"))
+                    if sender_ideology == "left":
+                        uncivil_left_count += 1
+                    elif sender_ideology == "right":
+                        uncivil_right_count += 1
+
+            if uncivil_left_count < uncivil_right_count:
+                preferred_uncivil_ideology = "left"
+            elif uncivil_right_count < uncivil_left_count:
+                preferred_uncivil_ideology = "right"
+            else:
+                preferred_uncivil_ideology = self._rng.choice(["left", "right"])
 
         last_index_by_real: Dict[str, int] = {}
         count_by_real: Dict[str, int] = {}
@@ -793,7 +813,15 @@ class Orchestrator:
             if preferred_like_value is not None and self._expected_like_minded_for_agent(name) is preferred_like_value:
                 score += 4
             if preferred_civility is not None and self._agent_civility_bucket(name) == preferred_civility:
-                score += 3
+                if preferred_civility == "uncivil" and preferred_uncivil_ideology is not None:
+                    traits = self._agent_traits.get(name) or {}
+                    raw_ideology = traits.get("ideology")
+                    if self._normalize_agent_ideology(raw_ideology) == preferred_uncivil_ideology:
+                        score += 5
+                    else:
+                        score += 1
+                else:
+                    score += 3
 
             message_count = count_by_real.get(name, 0)
             if message_count == 0:
@@ -1269,8 +1297,18 @@ class Orchestrator:
             + (f", unknown={unknown_cell_count}/{total} ({_pct(unknown_cell_count, total)})" if unknown_cell_count else ""),
         ]
         if classified_incivility:
+            uncivil_left = 0
+            uncivil_right = 0
+            for message in classified_incivility:
+                if message.is_incivil is True:
+                    traits = self._agent_traits.get(message.sender) or {}
+                    sender_ideology = self._normalize_agent_ideology(traits.get("ideology"))
+                    if sender_ideology == "left":
+                        uncivil_left += 1
+                    elif sender_ideology == "right":
+                        uncivil_right += 1
             lines.append(
-                f"- Incivil messages so far: {incivil_count}/{len(classified_incivility)} ({_pct(incivil_count, len(classified_incivility))})"
+                f"- Incivil messages so far: {incivil_count}/{len(classified_incivility)} ({_pct(incivil_count, len(classified_incivility))}) [left={uncivil_left}, right={uncivil_right}]"
             )
             lines.append(
                 f"- Civil messages so far: {civil_count}/{len(classified_incivility)} ({_pct(civil_count, len(classified_incivility))})"

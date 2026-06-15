@@ -175,13 +175,13 @@ class TestOrchestratorInit:
         assert "Reddit" in orch.ecological_criteria
 
     def test_first_participant_message_can_refine_alignment_cell(self):
-        state = _make_state(participant_stance_hint="against")
+        state = _make_state(participant_stance_hint=None)
         state.add_message(Message.create(
             sender="participant",
             content="La inmigracion es un derecho pero este plan esta mal planteado",
         ))
         orch, _ = _make_orchestrator(state=state)
-        assert orch._participant_alignment_cell_live() == "anti_policy_pro_topic"
+        assert orch._participant_alignment_cell_live() == "pro_topic"
 
     def test_unclear_first_participant_message_keeps_self_report_cell(self):
         state = _make_state(participant_stance_hint="against")
@@ -190,7 +190,7 @@ class TestOrchestratorInit:
             content="No se, tengo dudas todavia",
         ))
         orch, _ = _make_orchestrator(state=state)
-        assert orch._participant_alignment_cell_live() == "anti_policy_anti_topic"
+        assert orch._participant_alignment_cell_live() == "anti_topic"
 
     def test_treatment_fidelity_summary_includes_alignment_cell_counts(self):
         state = _make_state()
@@ -206,8 +206,8 @@ class TestOrchestratorInit:
 
         summary = orch._format_treatment_fidelity_summary()
         assert "Messages by alignment cell so far:" in summary
-        assert "pro_policy_pro_topic=1/2" in summary
-        assert "anti_policy_anti_topic=1/2" in summary
+        assert "pro_topic=1/2" in summary
+        assert "anti_topic=1/2" in summary
 
     @pytest.mark.asyncio
     async def test_director_evaluate_prompt_includes_global_speaker_memory(self):
@@ -374,8 +374,8 @@ class TestOrchestratorInit:
         orch, _ = _make_orchestrator(
             state=state,
             agent_traits={
-                "Alice": {"alignment_cell": "pro_policy_pro_topic", "ideology": "left"},
-                "Bob": {"alignment_cell": "anti_policy_pro_topic", "ideology": "left"},
+                "Alice": {"alignment_cell": "pro_topic", "ideology": "left"},
+                "Bob": {"alignment_cell": "anti_topic", "ideology": "left"},
             },
         )
         assert orch._agents_share_alignment_cell("Alice", "Bob") is False

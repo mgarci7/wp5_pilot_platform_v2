@@ -151,6 +151,7 @@ def validate_simulation_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     out["bsc_model_version"] = bsc_model_version
 
     out["boost_replies_mentions"] = bool(out.get("boost_replies_mentions", False))
+    out["ten_messages_mode"] = bool(out.get("ten_messages_mode", False))
 
     out["emotions_checkup_enabled"] = bool(out.get("emotions_checkup_enabled", False))
     out["emotions_checkup_time_minutes"] = int(out.get("emotions_checkup_time_minutes", 1))

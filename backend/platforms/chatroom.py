@@ -403,6 +403,7 @@ class SimulationSession:
             humanize_per_agent=self.simulation_config.get("humanize_per_agent") or {},
             agent_traits=traits,
             boost_replies_mentions=bool(self.simulation_config.get("boost_replies_mentions", False)),
+            ten_messages_mode=bool(self.simulation_config.get("ten_messages_mode", False)),
             rng=self._rng,
         )
         orc.set_participant_stance_hint(self.participant_stance_hint)
@@ -903,20 +904,12 @@ class SimulationSession:
             return
         emotion = data.get("emotion")
         tempted = bool(data.get("tempted_to_report", False))
+        reported_users = data.get("reported_users")
 
         self.logger.log_event("emotions_checkup_response", {
             "emotion": emotion,
-            "tempted_to_report": tempted
-        })
-
-    async def handle_seeking_information(self, data: dict) -> None:
-        """Handle an incoming seeking information event — log as an event."""
-        if not self.running:
-            return
-        duration = float(data.get("duration_seconds", 0.0))
-
-        self.logger.log_event("seeking_information", {
-            "duration_seconds": duration
+            "tempted_to_report": tempted,
+            "reported_users": reported_users,
         })
 
     # ── User message handling ─────────────────────────────────────────────────

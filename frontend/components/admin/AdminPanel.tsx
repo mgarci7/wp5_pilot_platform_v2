@@ -62,6 +62,7 @@ const DEFAULT_SIMULATION: SimulationConfig = {
   boost_replies_mentions: false,
   emotions_checkup_enabled: false,
   emotions_checkup_time_minutes: 1,
+  ten_messages_mode: false,
 }
 
 const DEFAULT_EXPERIMENTAL: ExperimentalConfig = createExperimental3x3Preset()

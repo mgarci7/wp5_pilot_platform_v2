@@ -65,6 +65,7 @@ export interface SimulationConfig {
   boost_replies_mentions?: boolean
   emotions_checkup_enabled?: boolean
   emotions_checkup_time_minutes?: number
+  ten_messages_mode?: boolean
 }
 
 export type AgentIncivility = "civil" | "uncivil"

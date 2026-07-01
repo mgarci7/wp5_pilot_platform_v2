@@ -23,6 +23,9 @@ Write-Host "Fetching upstream (Alejandro) and origin (mgarci7 fork)..."
 git fetch upstream main
 git fetch origin main
 
+Write-Host "Merging origin/main into local main..."
+git merge origin/main
+
 Write-Host "Merging upstream/main into local main..."
 git merge upstream/main
 
